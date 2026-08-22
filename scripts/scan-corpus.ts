@@ -9,7 +9,7 @@
 // APIWATCH_KEEP_CLONES=1 to keep the clones around, e.g. to inspect a specific repo's
 // results after the run.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -89,7 +89,13 @@ function mergeStats(into: CorpusStats, from: CorpusStats): void {
 }
 
 async function main() {
-  const urls = process.argv.slice(2)
+  const argv = process.argv.slice(2)
+  // `--skip <n>` drops the first n urls, so a run aborted partway can resume without
+  // recloning and rescanning what already succeeded.
+  const skipAt = argv.indexOf('--skip')
+  const skip = skipAt === -1 ? 0 : Number(argv[skipAt + 1] ?? 0)
+  const urls = argv.filter((a, i) => a !== '--skip' && i !== skipAt + 1).slice(skip)
+  const partialPath = process.env.APIWATCH_CORPUS_PARTIAL
   if (urls.length === 0) {
     process.stderr.write('usage: scan-corpus.ts <git-url> [<git-url> ...]\n')
     process.exitCode = 1
@@ -124,6 +130,17 @@ async function main() {
       const result = await scanCorpus([dest])
       mergeStats(stats, result)
       process.stderr.write(`[${n}/${urls.length}] scanned: ${result.callSites} sites\n`)
+
+      // Free the clone as soon as it is scanned. Holding every clone until the end cost
+      // 3.1 GB across 19 repos, so a 100 repo run would need roughly 17 GB of disk for
+      // trees that are never read again.
+      if (!keepClones) rmSync(dest, { recursive: true, force: true })
+
+      // A single oversized repo can exhaust the V8 heap and abort the process, which takes
+      // every prior repo's work with it. Writing the running total after each repo means a
+      // crash costs one repo instead of the whole run, and `--skip` resumes from here.
+      if (partialPath)
+        writeFileSync(partialPath, `${JSON.stringify({ scanned: n, stats }, null, 2)}\n`)
     }
 
     // Print before cleanup, not after: stats must reach stdout even though the finally
