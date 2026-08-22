@@ -114,7 +114,7 @@ function isFetchShadowedHere(call: CallExpression): boolean {
 }
 
 /** ESM import specifiers plus CommonJS `require(...)` specifiers, for pure/text-only rules. */
-function collectFileImports(sf: SourceFile): string[] {
+export function collectFileImports(sf: SourceFile): string[] {
   const esm = sf.getImportDeclarations().map((d) => d.getModuleSpecifierValue())
   const cjs = sf
     .getDescendantsOfKind(SyntaxKind.CallExpression)

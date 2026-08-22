@@ -24,4 +24,18 @@ describe('resolveOptions', () => {
     expect((await siteAt('retry-wrapped', 'svc.ts', /api\.get/)).options.retry).toBe('library'))
   it('treats got as retrying by default', async () =>
     expect((await siteAt('got-default', 'svc.ts', /got\(/)).options.retry).toBe('library'))
+  it('treats a shorthand timeout as configured but unknown', async () =>
+    expect((await siteAt('call-shorthand-timeout', 'svc.ts', /axios\.get/)).options.timeoutMs).toBe(
+      'instance-default',
+    ))
+  it('treats a shorthand retry as library-handled', async () =>
+    expect((await siteAt('call-shorthand-retry', 'svc.ts', /axios\.get/)).options.retry).toBe(
+      'library',
+    ))
+  it('detects a CommonJS require of a retry library', async () =>
+    expect((await siteAt('cjs-retry', 'svc.js', /axios\.get/)).options.retry).toBe('library'))
+  it('treats timeout: 0 as no timeout', async () =>
+    expect(
+      (await siteAt('axios-zero-timeout', 'svc.ts', /axios\.get/)).options.timeoutMs,
+    ).toBeNull())
 })
