@@ -38,4 +38,11 @@ describe('resolveOptions', () => {
     expect(
       (await siteAt('axios-zero-timeout', 'svc.ts', /axios\.get/)).options.timeoutMs,
     ).toBeNull())
+  // Regression: a `while (hasMore) { try { ... } catch {} }` pagination loop is structurally
+  // identical to a hand-rolled retry loop. It was previously misclassified as retry: 'manual',
+  // silently suppressing no-retry on genuinely unprotected call sites (see the coordinator's
+  // fix-round-2 message: 23.7% of a real repo's call sites were pagination, not retry). A
+  // for/while ancestor must never promote retry above 'none' on its own.
+  it('does not treat a pagination loop as manual retry', async () =>
+    expect((await siteAt('pagination-loop', 'svc.ts', /axios\.get/)).options.retry).toBe('none'))
 })

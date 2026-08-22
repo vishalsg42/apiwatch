@@ -1,6 +1,6 @@
 import { type CallExpression, type Node, SyntaxKind } from 'ts-morph'
 import type { CallOptions, ClientBinding } from '../model.js'
-import { collectFileImports } from './callsites.js'
+import { collectFileImports } from './imports.js'
 
 const RETRY_LIBS = ['axios-retry', 'p-retry', 'async-retry', 'retry-axios']
 const objArgs = (c: CallExpression) =>
@@ -63,11 +63,15 @@ export function resolveOptions(
     const imports = collectFileImports(call.getSourceFile())
     if (imports.some((i) => RETRY_LIBS.includes(i))) retry = 'library'
     else if (objArgs(call).some((o) => prop(o, 'retry') || prop(o, 'retries'))) retry = 'library'
-    else if (
-      call.getFirstAncestorByKind(SyntaxKind.ForStatement) ||
-      call.getFirstAncestorByKind(SyntaxKind.WhileStatement)
-    )
-      retry = 'manual'
+    // A `for`/`while` ancestor was previously treated as a hand-rolled retry loop and mapped
+    // to 'manual'. Measured against a real repo, this was wrong: a `while (hasMore) { try {
+    // ... } catch {} }` pagination loop is structurally identical to a retry loop, and 23.7%
+    // of that repo's call sites were pagination, not retry — every one of them silently
+    // suppressed a genuine no-retry finding. There is no cheap static discriminator between
+    // the two shapes, and "silence beats a wrong finding" cuts the other way here: a false
+    // suppression is invisible, while an occasional false 'no-retry' warn on a real hand-rolled
+    // retry loop is mild and visible. So this heuristic is gone; retry is only 'none' or
+    // 'library' now.
   }
   return { timeoutMs, retry }
 }
