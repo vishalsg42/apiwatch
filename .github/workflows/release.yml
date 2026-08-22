@@ -1,0 +1,73 @@
+name: Release
+
+# Publishes to npm when a GitHub Release is published.
+# The version that ships is whatever is in package.json on the tagged commit,
+# so bump and commit the version before tagging.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Full gate before anything is published. A broken release is far more
+      # expensive than a failed build: npm versions cannot be reused.
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit
+
+      - name: Lint
+        run: pnpm exec biome check .
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+      # The published binary is invoked through a symlink in node_modules/.bin.
+      # An earlier release shipped an inert bin because every local test called
+      # dist/cli.js by direct path, which is the one invocation that cannot fail.
+      - name: Verify the packed binary runs through its symlink
+        run: |
+          pnpm pack --pack-destination /tmp
+          TARBALL=$(ls -t /tmp/apiwatch-*.tgz | head -1)
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y > /dev/null
+          npm i "$TARBALL" > /dev/null
+          OUT=$(./node_modules/.bin/apiwatch --version)
+          echo "installed binary reported: $OUT"
+          test -n "$OUT" || { echo "published bin produces no output"; exit 1; }
+
+      # Refuse to republish an existing version rather than failing mid-publish.
+      - name: Check this version is not already on npm
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "$NAME@$VERSION is already published. Bump the version before releasing."
+            exit 1
+          fi
+          echo "publishing $NAME@$VERSION"
+
+      - name: Publish
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

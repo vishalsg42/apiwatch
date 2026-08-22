@@ -124,3 +124,19 @@ are analysis *input*, not shipped code. Several fixtures (`broken-syntax`, for e
 intentionally malformed, to prove apiwatch degrades gracefully on source it can't fully parse.
 Don't "fix" a fixture to satisfy the linter; if biome or tsc complains about something under
 `test/fixtures/`, that's expected.
+
+## Releasing
+
+Publishing is automated. To cut a release:
+
+1. Bump `version` in `package.json` and commit it to `main`.
+2. Create a GitHub Release tagged `v<version>` (for example `v0.1.1`).
+
+The `Release` workflow then typechecks, lints, builds, runs the full suite, packs
+the tarball and verifies the installed binary runs through its `node_modules/.bin`
+symlink, refuses to republish an existing version, and finally publishes to npm
+with provenance.
+
+It needs one repository secret, `NPM_TOKEN`: a granular access token scoped to
+this package with read and write permission. Scope it to `apiwatch` only and set
+an expiry rather than using an unscoped permanent token.
