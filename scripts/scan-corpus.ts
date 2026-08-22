@@ -94,7 +94,12 @@ async function main() {
   // recloning and rescanning what already succeeded.
   const skipAt = argv.indexOf('--skip')
   const skip = skipAt === -1 ? 0 : Number(argv[skipAt + 1] ?? 0)
-  const urls = argv.filter((a, i) => a !== '--skip' && i !== skipAt + 1).slice(skip)
+  // Drop the flag and its value only when the flag is actually present. Deriving the value
+  // index from a -1 flag index yields 0, which silently swallowed the first repo of every
+  // run that did not pass --skip.
+  const urls = (
+    skipAt === -1 ? argv : argv.filter((_, i) => i !== skipAt && i !== skipAt + 1)
+  ).slice(skip)
   const partialPath = process.env.APIWATCH_CORPUS_PARTIAL
   if (urls.length === 0) {
     process.stderr.write('usage: scan-corpus.ts <git-url> [<git-url> ...]\n')

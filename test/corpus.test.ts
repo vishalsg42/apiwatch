@@ -32,3 +32,22 @@ describe('scanCorpus', () => {
     expect(s.byRule['no-retry']).toBeUndefined()
   })
 })
+
+describe('scan-corpus argument parsing', () => {
+  // Regression: deriving the --skip value index from a -1 flag index yields 0, which drops
+  // argv[0] and silently swallowed the first repo of every run that omitted --skip.
+  const parse = (argv: string[]) => {
+    const skipAt = argv.indexOf('--skip')
+    const skip = skipAt === -1 ? 0 : Number(argv[skipAt + 1] ?? 0)
+    return (skipAt === -1 ? argv : argv.filter((_, i) => i !== skipAt && i !== skipAt + 1)).slice(
+      skip,
+    )
+  }
+
+  it('keeps every url when --skip is absent', () =>
+    expect(parse(['a', 'b', 'c'])).toEqual(['a', 'b', 'c']))
+  it('drops the flag, its value, and the skipped urls', () =>
+    expect(parse(['--skip', '1', 'a', 'b', 'c'])).toEqual(['b', 'c']))
+  it('handles --skip after the urls', () =>
+    expect(parse(['a', 'b', 'c', '--skip', '2'])).toEqual(['c']))
+})
