@@ -16,7 +16,12 @@ import { pathToFileURL } from 'node:url'
 import { runAudit } from '../src/cli/audit.js'
 import type { CorpusStats } from '../src/model.js'
 
-export async function scanCorpus(repoDirs: string[]): Promise<CorpusStats> {
+export type ScanOptions = {
+  /** Audit sample code, benchmarks and docs too. Off by default, matching `apiwatch audit`. */
+  includeNonShipping?: boolean
+}
+
+export async function scanCorpus(repoDirs: string[], opts: ScanOptions = {}): Promise<CorpusStats> {
   const stats: CorpusStats = {
     repos: 0,
     reposFailed: 0,
@@ -34,7 +39,11 @@ export async function scanCorpus(repoDirs: string[]): Promise<CorpusStats> {
       const st = statSync(dir)
       if (!st.isDirectory()) throw new Error(`${dir} is not a directory`)
 
-      const { model, sites } = await runAudit({ root: dir, json: true })
+      const { model, sites } = await runAudit({
+        root: dir,
+        json: true,
+        includeNonShipping: opts.includeNonShipping,
+      })
 
       stats.callSites += model.callSiteCount
       // no-timeout, no-retry and unvalidated-response all deliberately abstain on 'unknown'
@@ -101,10 +110,13 @@ async function main() {
   // Drop the flag and its value only when the flag is actually present. Deriving the value
   // index from a -1 flag index yields 0, which silently swallowed the first repo of every
   // run that did not pass --skip.
-  const urls = (
-    skipAt === -1 ? argv : argv.filter((_, i) => i !== skipAt && i !== skipAt + 1)
-  ).slice(skip)
+  const urls = (skipAt === -1 ? argv : argv.filter((_, i) => i !== skipAt && i !== skipAt + 1))
+    .filter((a) => a !== '--include-non-shipping')
+    .slice(skip)
   const partialPath = process.env.APIWATCH_CORPUS_PARTIAL
+  // Lets one corpus be measured under both rules, so a run started before the non-shipping
+  // exclusion existed can be extended without mixing two measurement rules in one total.
+  const includeNonShipping = argv.includes('--include-non-shipping')
   if (urls.length === 0) {
     process.stderr.write('usage: scan-corpus.ts <git-url> [<git-url> ...]\n')
     process.exitCode = 1
@@ -142,7 +154,7 @@ async function main() {
         // record it as a failed repo, same as any repo that fails to analyse.
       }
 
-      const result = await scanCorpus([dest])
+      const result = await scanCorpus([dest], { includeNonShipping })
       mergeStats(stats, result)
       process.stderr.write(`[${n}/${urls.length}] scanned: ${result.callSites} sites\n`)
 
