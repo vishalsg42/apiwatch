@@ -4,7 +4,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { discoverWorkspace } from '../src/workspace/discover.js'
 import { fx } from './helpers.js'
 
-// created at test time — a committed node_modules/ would be swallowed by .gitignore
+// created at test time; a committed node_modules/ would be swallowed by .gitignore
 beforeAll(() => {
   mkdirSync(join(fx('simple-express'), 'node_modules/axios'), { recursive: true })
   writeFileSync(join(fx('simple-express'), 'node_modules/axios/index.js'), 'module.exports={}')

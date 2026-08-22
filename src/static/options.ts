@@ -4,7 +4,7 @@ import type { CallOptions, ClientBinding } from '../model.js'
 /**
  * Looks up an object literal's OWN top-level property by name, accepting both a regular
  * `PropertyAssignment` (`{ timeout: 5000 }`) and a `ShorthandPropertyAssignment`
- * (`{ timeout }`) — never a source-text regex, and never descending into nested literals.
+ * (`{ timeout }`); never a source-text regex, and never descending into nested literals.
  * A shorthand has no initializer node to inspect (the property name IS the binding), so it is
  * reported distinctly from a regular assignment: callers that care about a concrete literal
  * value (e.g. a numeric timeout) can tell "present but not statically known" apart from
@@ -21,8 +21,8 @@ const prop = (n: Node, name: string): PropLookup | undefined => {
 }
 
 /**
- * The call's own method name — a property-access call's property name, normalized
- * (`.del()` -> `delete`) — or undefined for a bare call (`axios(...)`, `fetch(...)`,
+ * The call's own method name: a property-access call's property name, normalized
+ * (`.del()` -> `delete`), or undefined for a bare call (`axios(...)`, `fetch(...)`,
  * `got(...)`, `request(...)`). `resolveOptions` isn't handed the method callsites.ts already
  * extracted (that signature is owned elsewhere), so it's recomputed here the same way.
  */
@@ -35,7 +35,7 @@ function methodOf(call: CallExpression): string | undefined {
 
 /**
  * The argument index that holds this call's options/config object, decided from the client
- * kind and method shape — NOT "the last object-literal argument". That rule is wrong for
+ * kind and method shape, NOT "the last object-literal argument". That rule is wrong for
  * `axios.post(url, data)` with no config: the request BODY is the last (and only) object
  * literal there, and reading options from it turns a domain field like `{ retry: true }` in
  * the body into a false 'library' verdict, or a body field named `timeout` into a false
@@ -56,12 +56,12 @@ function configArgIndex(
       return undefined
     case 'fetch':
     case 'node-fetch':
-      return 1 // fetch(url, init) — same shape for a bare call or a method-style call
+      return 1 // fetch(url, init): same shape for a bare call or a method-style call
     case 'got':
-      return 1 // got(url, options) / got.get(url, options) — options is always arg 1
+      return 1 // got(url, options) / got.get(url, options): options is always arg 1
     case 'request':
     case 'request-promise':
-      // request(options, cb) puts the options object FIRST — there is no url argument in the
+      // request(options, cb) puts the options object FIRST: there is no url argument in the
       // bare-call form. request.get(url, options, cb) is ordinary method-style usage of the
       // same client and puts options SECOND, after the url. Reading only the bare-call shape
       // meant every method-style call (`request.get(url, { timeout }, cb)`) read no options at
@@ -84,10 +84,10 @@ function configObj(call: CallExpression, binding: ClientBinding): Node | undefin
 
 /**
  * The call's HTTP method, read from a `method:` string literal in its resolved config object,
- * for the call shapes that carry the method THERE rather than as a property-access name —
+ * for the call shapes that carry the method THERE rather than as a property-access name:
  * `axios({ method: 'post', ... })`, `fetch(url, { method: 'POST' })`. Normalized to lowercase.
  * `callsites.ts` only ever populated `method` from a property-access call's own name, so a bare
- * call's config-object method was invisible to any rule that reads `CallSite.method` — the
+ * call's config-object method was invisible to any rule that reads `CallSite.method`; the
  * idempotent-method skip in `no-retry` in particular treated an unreadable method as idempotent
  * by default, which incorrectly fired on a bare `axios({ method: 'post', ... })` call.
  */
@@ -111,7 +111,7 @@ export function resolveOptions(
     if (t) {
       if (!t.shorthand && t.initializer.getKind() === SyntaxKind.NumericLiteral) {
         const n = Number(t.initializer.getText())
-        // axios (and others) document `timeout: 0` as "no timeout" — its own default — so a
+        // axios (and others) document `timeout: 0` as "no timeout", its own default, so a
         // literal 0 must NOT suppress no-timeout; leave timeoutMs unset and let the
         // instance-default fallback below still apply.
         timeoutMs = n === 0 ? null : n
@@ -139,7 +139,7 @@ export function resolveOptions(
   // A `for`/`while` ancestor was previously treated as a hand-rolled retry loop and mapped
   // to 'manual'. Measured against a real repo, this was wrong: a `while (hasMore) { try {
   // ... } catch {} }` pagination loop is structurally identical to a retry loop, and 23.7%
-  // of that repo's call sites were pagination, not retry — every one of them silently
+  // of that repo's call sites were pagination, not retry; every one of them silently
   // suppressed a genuine no-retry finding. There is no cheap static discriminator between
   // the two shapes, and "silence beats a wrong finding" cuts the other way here: a false
   // suppression is invisible, while an occasional false 'no-retry' warn on a real hand-rolled
@@ -149,7 +149,7 @@ export function resolveOptions(
   // The same reasoning killed a second heuristic: "the file imports a retry library ANYWHERE"
   // used to force EVERY call in that file to 'library', even a bare call nowhere near the
   // wrapper (`import pRetry from 'p-retry'` with one call actually wrapped in `pRetry(...)` and
-  // one call that plainly isn't — neither got flagged). That's a file-wide false suppression,
+  // one call that plainly isn't, neither got flagged). That's a file-wide false suppression,
   // the same shape as the pagination bug above. There is no cheap way to prove a specific call
   // is "actually enclosed by" an arbitrary higher-order retry wrapper without knowing that
   // wrapper's calling convention, so this only trusts what it can see at the call site itself

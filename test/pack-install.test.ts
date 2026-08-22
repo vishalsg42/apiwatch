@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { repoRoot, tmpDir } from './helpers.js'
 
 // Regression for the bug that shipped in a real `npm pack` + `npm install`: npm links a bin as
-// a SYMLINK, and `./node_modules/.bin/apiwatch --version` printed nothing and exited 0 — the
+// a SYMLINK, and `./node_modules/.bin/apiwatch --version` printed nothing and exited 0; the
 // published binary did nothing. `test/cli.test.ts` runs `node dist/cli.js` by its direct path,
 // which never exercises the symlink, so that test suite passed while the real install was
 // broken. This test reproduces the real consumer path: pack the tarball, install it into a

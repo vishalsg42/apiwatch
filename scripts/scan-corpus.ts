@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Public-corpus scanner: the launch dataset (aggregate stats over public repos, no per-repo
 // identity retained) and a false-positive smoke test at scale. scanCorpus only ever touches
-// local directories — cloning a URL list into a temp dir is main()'s job, not this function's.
+// local directories; cloning a URL list into a temp dir is main()'s job, not this function's.
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, realpathSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -42,7 +42,7 @@ export async function scanCorpus(repoDirs: string[]): Promise<CorpusStats> {
       for (const [rule, count] of Object.entries(model.countsByRule))
         stats.byRule[rule] = (stats.byRule[rule] ?? 0) + count
     } catch {
-      // one repo that fails to clone, discover or parse must not abort the run — record it
+      // one repo that fails to clone, discover or parse must not abort the run: record it
       // and move on to the next.
       stats.reposFailed++
     }
@@ -66,7 +66,7 @@ async function main() {
     try {
       execFileSync('git', ['clone', '--depth', '1', '--quiet', url, dest], { stdio: 'ignore' })
     } catch {
-      // an unclonable URL still gets counted — scanCorpus will find nothing at `dest` and
+      // an unclonable URL still gets counted: scanCorpus will find nothing at `dest` and
       // record it as a failed repo, same as any repo that fails to analyse.
     }
     dirs.push(dest)
@@ -78,7 +78,7 @@ async function main() {
 
 // Entrypoint guard, mirroring src/cli/index.ts: run main() only when this file is the
 // program's main entry (`pnpm tsx scripts/scan-corpus.ts ...`), never when imported by tests.
-// Must realpath argv[1] before comparing — Node's ESM loader realpaths the module it loads, so
+// Must realpath argv[1] before comparing: Node's ESM loader realpaths the module it loads, so
 // import.meta.url is already a realpath, and a symlinked invocation would otherwise never match.
 const isMainEntry = () => {
   const entry = process.argv[1]

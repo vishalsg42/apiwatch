@@ -19,7 +19,7 @@ describe('cli', () => {
     ))
 
   // The built bin used to export runCli but never invoke it, so `node dist/cli.js --version`
-  // printed nothing and exited 0 silently — the `bin` entry was inert. This guards the
+  // printed nothing and exited 0 silently; the `bin` entry was inert. This guards the
   // entrypoint fix by actually spawning the built artifact. Skipped when dist/cli.js hasn't
   // been built yet (`pnpm vitest run` alone does not build); run `pnpm build` first to cover it.
   const distCli = join(repoRoot, 'dist/cli.js')

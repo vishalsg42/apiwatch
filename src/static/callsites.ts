@@ -31,7 +31,7 @@ import { isResponseValidated } from './validation.js'
 // IDEMPOTENT set's 'options' entry below is dead by design, not an oversight).
 const METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'del', 'head', 'request'])
 
-// A synthetic binding for a bare `fetch(...)` call that resolves to no import — the global.
+// A synthetic binding for a bare `fetch(...)` call that resolves to no import: the global.
 const NATIVE_FETCH: ClientBinding = {
   name: 'fetch',
   kind: 'fetch',
@@ -53,7 +53,7 @@ const FN_LIKE_KINDS = new Set([
 /**
  * Whether a parameter binds the name `fetch`. `ParameterDeclaration.getName()` returns the
  * PATTERN SOURCE TEXT for a destructured parameter (e.g. `"{ fetch }"`, not `"fetch"`), so a
- * destructured shape must be unpacked via its name node instead — walking `BindingElement`s
+ * destructured shape must be unpacked via its name node instead: walking `BindingElement`s
  * covers both `{ fetch }` and a renamed-into `{ http: fetch }` (the bound local name, not the
  * property name, is what matters for a bare `fetch(...)` call).
  */
@@ -74,9 +74,9 @@ function paramDeclaresFetch(p: ParameterDeclaration): boolean {
 }
 
 /**
- * Whether the given node itself (not its descendants) declares a binding named `fetch` —
+ * Whether the given node itself (not its descendants) declares a binding named `fetch`:
  * a function parameter (including a destructured one), a variable or function declared
- * directly in this block/source file (not one nested inside a deeper block — a function
+ * directly in this block/source file (not one nested inside a deeper block; a function
  * declaration is a scope-level binding just like `var`/`let`/`const`, so this also covers
  * a call site inside the shadowing function's own body, i.e. recursion), a named function
  * expression's own self-reference, or a `catch` clause's bound name. Used to walk a call's
@@ -147,7 +147,7 @@ export function findCallSites(
     let b: ClientBinding | undefined
     if (binding === 'fetch' && expr.getKind() === SyntaxKind.Identifier) {
       // Task 4's registry suppresses `fetch` for the WHOLE FILE when any local binding named
-      // `fetch` exists anywhere in it — too coarse. Re-check per call site, syntactically, by
+      // `fetch` exists anywhere in it, too coarse. Re-check per call site, syntactically, by
       // walking this call's own ancestor scopes, so a shadowed `fetch` elsewhere in the file
       // doesn't erase a genuine native-fetch call site here.
       if (isFetchShadowedHere(call)) continue
@@ -158,7 +158,7 @@ export function findCallSites(
     if (!b) continue
     // A property-access call's method comes from its own name (`.post()`). A bare call
     // (`axios({ method: 'post', ... })`, `fetch(url, { method: 'POST' })`) carries it in the
-    // config object instead — read it from there so a rule that skips idempotent methods
+    // config object instead: read it from there so a rule that skips idempotent methods
     // doesn't have to treat "method unreadable" and "method is get/head" as the same thing.
     method ??= configMethod(call, b)
 
@@ -183,7 +183,7 @@ export function findCallSites(
 }
 
 /**
- * `request`'s options object may key the endpoint under `url:` or `uri:` — both are
+ * `request`'s options object may key the endpoint under `url:` or `uri:`; both are
  * documented, canonical usage, not an edge case.
  */
 const URL_PROP_NAMES = ['url', 'uri']
@@ -191,7 +191,7 @@ const URL_PROP_NAMES = ['url', 'uri']
 /**
  * The call's URL argument. For an options-object-first call (`request({ url, ... }, cb)`),
  * reads the object's OWN top-level `url`/`uri` property via the AST and returns its real
- * initializer node — never a source-text regex, and never a fabricated node. A regex over the
+ * initializer node, never a source-text regex, and never a fabricated node. A regex over the
  * whole object's text matches the FIRST `url:` anywhere, including one nested inside another
  * property (e.g. `proxy: { url: '...' }`), which can misreport a nested field as the endpoint.
  */

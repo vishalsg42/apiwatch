@@ -13,7 +13,7 @@ export function renderTty(m: ReportModel): string {
     '',
   )
   // The counts-by-rule summary always covers every finding, even when the detail
-  // list below is capped — a repo with hundreds of findings still gets an honest total.
+  // list below is capped: a repo with hundreds of findings still gets an honest total.
   for (const [rule, n] of Object.entries(m.countsByRule)) {
     const sev = m.findings.find((f) => f.rule === rule)?.severity
     L.push(

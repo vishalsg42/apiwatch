@@ -49,7 +49,7 @@ export async function runAudit(
   let output = opts.json ? renderJson(model) : renderTty(model)
 
   if (!opts.json) {
-    // Writing .apiwatch/audit.md is a best-effort side note, not the audit's purpose — a
+    // Writing .apiwatch/audit.md is a best-effort side note, not the audit's purpose; a
     // read-only root (CI checkout, container, read-only mount) must not turn a successful
     // audit into an unhandled EACCES rejection. Degrade to a warning line instead.
     try {

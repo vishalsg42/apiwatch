@@ -34,7 +34,7 @@ const bind = (
 ): ClientBinding => ({ name, kind, origin, instanceTimeout, instanceRetry })
 
 /**
- * Whether an object literal has an OWN top-level property whose name is in `names` — accepting
+ * Whether an object literal has an OWN top-level property whose name is in `names`: accepting
  * both a regular `PropertyAssignment` (`{ timeout: 5000 }`) and a `ShorthandPropertyAssignment`
  * (`{ timeout }`). Never descends into nested object literals (e.g. `httpsAgent: new
  * https.Agent({ timeout: 5000 })` must not count) and never scans source text, so a property
@@ -57,7 +57,7 @@ const RETRY_PROPS = new Set(['retry', 'retries'])
 /**
  * Detects `<clientBinding>.create({...})` and, when it resolves to an already-known client
  * binding, produces a derived ClientBinding for it. Only inspects the OWN top-level properties
- * of the first argument when it's an object literal — never descends into nested object
+ * of the first argument when it's an object literal; never descends into nested object
  * literals, and never scans the call's source text (a `// TODO: add retry handling here`
  * comment sitting one line inside the call must never be mistaken for a `retry` option).
  */
@@ -128,9 +128,9 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   }
 
   // assignments: `this.api = axios.create({...})` / `module.exports.api = axios.create({...})`.
-  // Registered under the bare property name — call-site matching strips a leading `this.`. A
+  // Registered under the bare property name: call-site matching strips a leading `this.`. A
   // `module.exports.x = ...` / `exports.x = ...` form is this file's CJS export surface, exactly
-  // like an exported `const x = ...` — it must set `exportedAs` too, or the cross-module
+  // like an exported `const x = ...`: it must set `exportedAs` too, or the cross-module
   // registry (buildRegistry only records bindings with `exportedAs` set) never sees it, and a
   // CJS-only file exporting this way silently produces zero call sites downstream.
   for (const be of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
@@ -156,12 +156,12 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   }
 
   // NestJS: constructor(private httpService: HttpService)
-  // Gated on the file actually importing `@nestjs/axios` — the `out.size ||` half of the old
+  // Gated on the file actually importing `@nestjs/axios`; the `out.size ||` half of the old
   // condition was almost always true (any other client already registered in this file made
   // `out.size` truthy), so the NestJS branch effectively ran unconditionally and matched a
   // parameter's TYPE NODE by substring against its full text (`p.getText()` includes the
   // parameter's own name), so `mockHttpService: MockHttpService` in an ordinary axios test file
-  // matched too. Match the type node's own name exactly instead — still purely syntactic.
+  // matched too. Match the type node's own name exactly instead, still purely syntactic.
   if (sf.getImportDeclarations().some((d) => d.getModuleSpecifierValue() === '@nestjs/axios'))
     for (const p of sf.getDescendantsOfKind(SyntaxKind.Parameter)) {
       const typeNode = p.getTypeNode()

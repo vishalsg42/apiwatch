@@ -22,12 +22,12 @@ export function collectFileImports(sf: SourceFile): string[] {
 }
 
 /**
- * The local binding names this file imports BY NAME — ESM named imports, plus their CommonJS
+ * The local binding names this file imports BY NAME: ESM named imports, plus their CommonJS
  * twin `const { x } = require(...)`. Deliberately excludes default and namespace imports (ESM
  * `import x from ...` / CJS `const x = require(...)`): those bindings are almost always the
  * client itself (`import axios from 'axios'`, `const request = require('request')`), and the
  * one caller of this helper uses it to detect a response escaping to a HELPER function pulled
- * in from elsewhere — which must not match the HTTP call's own callee.
+ * in from elsewhere, which must not match the HTTP call's own callee.
  */
 export function collectImportedNames(sf: SourceFile): Set<string> {
   const names = new Set<string>()

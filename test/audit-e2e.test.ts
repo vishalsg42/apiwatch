@@ -25,7 +25,7 @@ describe('apiwatch audit', () => {
     expect(existsSync(join(d, '.apiwatch/audit.md'))).toBe(true)
   })
   // Revision 2 asserted filesSkipped > 0 on a malformed file, but TypeScript's parser is
-  // error-recovering and never throws on invalid JS — it returns a tree with diagnostics
+  // error-recovering and never throws on invalid JS; it returns a tree with diagnostics
   // instead, so filesSkipped stays 0 even for src/bad.js. What actually matters is that one
   // malformed file must not suppress findings in sibling files, so we assert on the real axios
   // call in broken-syntax/src/ok.js instead.

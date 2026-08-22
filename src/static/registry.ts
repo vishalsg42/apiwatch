@@ -17,8 +17,8 @@ export function buildRegistry(projects: { project: Project }[]): Map<string, Cli
 }
 
 /**
- * Looks up `${target}#${importedName}` in the registry — resolving directly (`./http`) or via a
- * barrel (`./http/index`) — and, if found, binds it locally under `localName`.
+ * Looks up `${target}#${importedName}` in the registry, resolving directly (`./http`) or via a
+ * barrel (`./http/index`), and, if found, binds it locally under `localName`.
  */
 function apply(
   local: Map<string, ClientBinding>,
@@ -44,7 +44,7 @@ export function resolveClients(sf: SourceFile, reg: Map<string, ClientBinding>) 
   }
 
   // CJS: `const { api } = require('./http')`. Without this, resolveClients only ever looked at
-  // `getImportDeclarations()` — which is empty for a CommonJS file — so a cross-module client
+  // `getImportDeclarations()`, which is empty for a CommonJS file, so a cross-module client
   // exported via `module.exports.api = axios.create(...)` and consumed via `require` produced
   // zero call sites for every file that imported it this way.
   for (const v of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {

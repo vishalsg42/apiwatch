@@ -5,13 +5,13 @@ import { pathToFileURL } from 'node:url'
 import type { CliIo } from '../model.js'
 import { runAudit } from './audit.js'
 
-const USAGE = `apiwatch — audit outbound third-party HTTP calls
+const USAGE = `apiwatch: audit outbound third-party HTTP calls
 
   apiwatch audit [--root <dir>] [--json] [--fail-on error|warn]
 `
 const version = () => {
   // dist/cli.js (built) sits one level below repo root; src/cli/index.ts (dev/test,
-  // run directly via vitest/tsx) sits two levels below — try both so `--version`
+  // run directly via vitest/tsx) sits two levels below; try both so `--version`
   // works whether apiwatch is running from source or from the tsup build.
   for (const up of ['../package.json', '../../package.json']) {
     const candidate = resolve(import.meta.dirname, up)
@@ -51,10 +51,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 
 // Entrypoint guard: invoke runCli only when this module is the program's main entry (running
 // as the built `dist/cli.js` bin, or directly via `node src/cli/index.ts` / tsx), not when it's
-// imported by tests. Without this the bin was inert — `apiwatch --version` printed nothing.
+// imported by tests. Without this the bin was inert: `apiwatch --version` printed nothing.
 //
 // npm links a bin as a SYMLINK. `process.argv[1]` is the symlink path, and `path.resolve` does
-// not follow symlinks — but Node's ESM loader realpaths the module it loads, so `import.meta.url`
+// not follow symlinks, but Node's ESM loader realpaths the module it loads, so `import.meta.url`
 // is already the REALPATH. Comparing a resolved-but-not-realpathed argv[1] against a realpathed
 // import.meta.url never matches when running through a symlinked bin (i.e. every real `npm
 // install` of this package), so the guard silently failed and the CLI did nothing. Realpathing

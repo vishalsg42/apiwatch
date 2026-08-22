@@ -13,7 +13,7 @@ const F = (
 ): Finding => ({ rule, severity, callSiteId: s.id, file: s.file, line: s.line, message, evidence })
 
 // `undefined` covers a call whose method truly can't be read at all (e.g. a bare `fetch(url)`
-// with no config object) — those default to HTTP GET, which is idempotent, so treating unknown
+// with no config object); those default to HTTP GET, which is idempotent, so treating unknown
 // as idempotent-eligible here is intentional, not a fallback of convenience. It must NOT be
 // used to paper over a method apiwatch simply forgot to read: `CallSite.method` is now also
 // populated from a bare call's config object (`axios({ method: 'post', ... })`), so a call that
@@ -44,7 +44,7 @@ export const noRetry: Rule = {
   check: (s) =>
     s
       // No separate `x.client !== 'got'` check: resolveOptions already forces retry:'library'
-      // for every got call site, so options.retry === 'none' can never be true for got — the
+      // for every got call site, so options.retry === 'none' can never be true for got; the
       // extra client check was unreachable dead code, not a second line of defense.
       .filter((x) => x.options.retry === 'none' && IDEMPOTENT.has(x.method))
       .map((x) =>
@@ -52,7 +52,7 @@ export const noRetry: Rule = {
           'no-retry',
           'warn',
           x,
-          'no retry or backoff — one transient failure becomes an error',
+          'no retry or backoff: one transient failure becomes an error',
           `${x.client} ${x.method ?? 'request'} with retry: none`,
         ),
       ),
@@ -85,7 +85,7 @@ export const deprecatedClient: Rule = {
     const seen = new Set<string>()
     const out: Finding[] = []
     for (const x of s) {
-      // request-promise is a thin promise wrapper AROUND `request` — deprecated alongside its
+      // request-promise is a thin promise wrapper AROUND `request`, deprecated alongside its
       // dependency, not just similar to it. The README's own example output shows a
       // request-promise call site, so this rule missing it entirely was a real, visible gap.
       const isRequestFamily = x.client === 'request' || x.client === 'request-promise'

@@ -19,7 +19,7 @@ export type CallOptions = {
   timeoutMs: number | 'instance-default' | null
   // No 'manual': a `for`/`while` ancestor was once mapped to 'manual', but that heuristic
   // misclassified pagination loops as retry and silently suppressed 22 of 93 real findings in
-  // one measured repo — it was deliberately killed (see options.ts for the full account).
+  // one measured repo; it was deliberately killed (see options.ts for the full account).
   // Leaving 'manual' in this public type would just invite a contributor to re-implement it.
   retry: 'none' | 'library'
   validated: boolean | 'unknown'

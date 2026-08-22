@@ -7,7 +7,7 @@ import { projectsFor, sitesFor } from './helpers.js'
 describe('findCallSites', () => {
   it('finds every axios call shape', async () => {
     const s = await sitesFor('axios-variants', 'svc.ts')
-    // The 4th call is a bare `axios({ method: 'get', url: ... })` — method now comes from the
+    // The 4th call is a bare `axios({ method: 'get', url: ... })`: method now comes from the
     // config object read in `configMethod`, not just a property-access call's own name, so it
     // reads 'get' instead of the previously-pinned `undefined`. See the no-retry idempotency
     // regression tests in test/rules.test.ts for why this matters: before this fix, an
@@ -77,8 +77,8 @@ describe('findCallSites', () => {
   })
 
   // Regression: resolveClients only walked ESM getImportDeclarations(), so a client exported
-  // via `module.exports.api = axios.create(...)` and consumed via `const { api } = require(...)`
-  // — an ordinary CJS pattern — produced zero call sites.
+  // via `module.exports.api = axios.create(...)` and consumed via `const { api } = require(...)`,
+  // an ordinary CJS pattern, produced zero call sites.
   it('finds calls on a CJS cross-module client exported via module.exports', async () =>
     expect(await sitesFor('cjs-shared-client', 'payments.js')).toHaveLength(1))
 
