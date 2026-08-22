@@ -59,12 +59,17 @@ function configArgIndex(
       return undefined
     case 'fetch':
     case 'node-fetch':
-      return method === undefined ? 1 : undefined // fetch(url, init)
+      return 1 // fetch(url, init) — same shape for a bare call or a method-style call
     case 'got':
-      return method === undefined ? 1 : undefined // got(url, options)
+      return 1 // got(url, options) / got.get(url, options) — options is always arg 1
     case 'request':
     case 'request-promise':
-      return method === undefined ? 0 : undefined // request(options, cb)
+      // request(options, cb) puts the options object FIRST — there is no url argument in the
+      // bare-call form. request.get(url, options, cb) is ordinary method-style usage of the
+      // same client and puts options SECOND, after the url. Reading only the bare-call shape
+      // meant every method-style call (`request.get(url, { timeout }, cb)`) read no options at
+      // all and reported a false no-timeout on a correctly-protected call.
+      return method === undefined ? 0 : 1
     case 'node:http':
       return method === 'request' ? 0 : undefined // http.request(options, cb)
     default:

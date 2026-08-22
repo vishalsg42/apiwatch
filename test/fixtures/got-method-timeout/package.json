@@ -1,0 +1,7 @@
+{
+  "name": "got-method-timeout",
+  "version": "1.0.0",
+  "dependencies": {
+    "got": "^12.0.0"
+  }
+}
