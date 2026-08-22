@@ -55,6 +55,10 @@ export async function siteAt(fixture: string, file: string, match: RegExp) {
   return hit
 }
 
+export async function validatedFor(fixture: string, file: string) {
+  return (await sitesFor(fixture, file))[0].options.validated
+}
+
 export function classify(exprText: string | undefined) {
   if (exprText === undefined) return classifyUrl(undefined)
   const p = new Project({ useInMemoryFileSystem: true })

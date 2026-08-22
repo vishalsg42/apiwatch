@@ -1,6 +1,70 @@
-// Stub — Task 8 replaces this with real response-validation detection.
-import type { CallExpression } from 'ts-morph'
+import { type CallExpression, type PropertyAccessExpression, SyntaxKind } from 'ts-morph'
+import { collectFileImports } from './imports.js'
 
-export function isResponseValidated(_call: CallExpression): boolean | 'unknown' {
-  return 'unknown'
+const VALIDATOR_LIBS = ['zod', 'joi', '@hapi/joi', 'yup', 'ajv', 'class-validator']
+const MEMBER_NAMES = new Set(['parse', 'safeParse', 'validate', 'validateSync', 'cast', 'assert'])
+const FREE_NAMES = new Set(['validate', 'validateSync', 'validateOrReject', 'assert'])
+
+/**
+ * Whether the response of an HTTP call is validated before use. Only a PROVABLE `false` may
+ * produce a finding — every path that can't be followed syntactically returns `'unknown'`,
+ * which keeps the `unvalidated-response` rule silent rather than wrong.
+ *
+ * Three things this deliberately gets right that a naive version doesn't:
+ *
+ * 1. The import check uses `collectFileImports`, not `sf.getImportDeclarations()` alone,
+ *    because the latter returns `[]` for a CommonJS file (`const Joi = require('joi')`) — that
+ *    blind spot would turn a validated CJS call site into a false positive.
+ *
+ * 2. "no validator library imported in THIS file" only rules out a *direct* validator call in
+ *    this file — it says nothing about whether the response value is handed off to a helper
+ *    imported from elsewhere (e.g. `handle(await axios.get(...))` where `handle` lives in
+ *    another module that may validate it). So the local-import check only gates the two "prove
+ *    it's validated" branches; the escape-to-an-imported-function check always runs and can
+ *    still downgrade the verdict to `'unknown'` even when this file imports no validator lib.
+ *
+ * 3. Whether the enclosing function validates is decided per call NODE (a member call's
+ *    property name, a free call's identifier name), never by running a regex over the whole
+ *    enclosing function's source text — that would also match a `.validate(`/`.parse(` sitting
+ *    in a comment, a string, or an unrelated nested call (e.g. `JSON.parse`), the exact class of
+ *    bug this project has already shipped and fixed twice for whole-body regexes.
+ */
+export function isResponseValidated(call: CallExpression): boolean | 'unknown' {
+  const sf = call.getSourceFile()
+  const imports = collectFileImports(sf)
+  const hasValidatorLib = imports.some((i) => VALIDATOR_LIBS.includes(i))
+
+  const fn = call.getFirstAncestor(
+    (a) =>
+      a.getKind() === SyntaxKind.FunctionDeclaration ||
+      a.getKind() === SyntaxKind.ArrowFunction ||
+      a.getKind() === SyntaxKind.MethodDeclaration,
+  )
+  if (!fn) return 'unknown'
+
+  const calls = fn.getDescendantsOfKind(SyntaxKind.CallExpression)
+
+  const hasMemberValidatorCall = calls.some((c) => {
+    const e = c.getExpression()
+    return (
+      e.getKind() === SyntaxKind.PropertyAccessExpression &&
+      MEMBER_NAMES.has((e as PropertyAccessExpression).getName())
+    )
+  })
+  if (hasValidatorLib && hasMemberValidatorCall) return true
+
+  const hasFreeValidatorCall = calls.some((c) => {
+    const e = c.getExpression()
+    return e.getKind() === SyntaxKind.Identifier && FREE_NAMES.has(e.getText())
+  })
+  if (hasValidatorLib && hasFreeValidatorCall) return true
+
+  const importedNames = new Set(
+    sf.getImportDeclarations().flatMap((d) => d.getNamedImports().map((n) => n.getName())),
+  )
+  const escapes = calls.some((c) => {
+    const e = c.getExpression()
+    return e.getKind() === SyntaxKind.Identifier && importedNames.has(e.getText())
+  })
+  return escapes ? 'unknown' : false
 }

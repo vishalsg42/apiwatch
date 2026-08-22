@@ -1,0 +1,8 @@
+{
+  "name": "validated-cjs",
+  "version": "1.0.0",
+  "dependencies": {
+    "axios": "^1.7.0",
+    "joi": "^17.13.0"
+  }
+}
