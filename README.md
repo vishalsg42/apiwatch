@@ -6,6 +6,12 @@ A zero-config CLI that statically audits outbound third-party HTTP calls in your
 npx apiwatch audit
 ```
 
+No install needed for that. To add it to a project instead:
+
+```
+npm i -D apiwatch
+```
+
 ## Before
 
 Node's `fetch` and the `request` library both default to **no timeout**. An unprotected call to a vendor endpoint hangs until that vendor responds — which, if the vendor is down, can be never.
@@ -20,7 +26,7 @@ Nothing here is wrong syntactically. It ships, it works in staging, and it takes
 
 ## After
 
-Real output from `apiwatch audit` against a production credit-bureau integration service, paths anonymised:
+Real output from `apiwatch audit` against a production Node backend, paths anonymised:
 
 ```
   analysed 46 of 46 files · 10 outbound call sites
@@ -37,9 +43,9 @@ Real output from `apiwatch audit` against a production credit-bureau integration
 
 Across five production services, the tool measured **148 outbound call sites: 13 with a timeout (8.8%), 0 with retry (0.0%), 0 validating the response.** That is not a cherry-picked repo — it is the default state of hand-rolled HTTP calls in real backends.
 
-## Installation
+## Development
 
-This project uses [pnpm](https://pnpm.io). To install dependencies and run commands:
+To work on apiwatch itself (not to use it as a dependency — see the install line above for that), this repo uses [pnpm](https://pnpm.io):
 
 ```
 pnpm install
@@ -47,7 +53,7 @@ pnpm test
 pnpm build
 ```
 
-(Running `npm install` is not supported — the lockfile and `node_modules` layout are managed by pnpm.)
+(Running `npm install` against this repo's own lockfile is not supported — the lockfile and `node_modules` layout here are managed by pnpm. This has no bearing on installing the published package, which works fine with `npm i -D apiwatch`.)
 
 ## Usage
 
@@ -59,16 +65,16 @@ npx apiwatch audit [--root <dir>] [--json] [--fail-on error|warn]
 - `--json` — emit the machine-readable report (`schemaVersion`, `findings[]`, per-rule counts) instead of the terminal report.
 - `--fail-on error|warn` — exit non-zero when findings of that severity or above exist, for wiring into CI.
 
-apiwatch never executes your code. It parses source with the TypeScript compiler API, resolves HTTP client bindings (including ones re-exported across modules and instances built with `axios.create()`), and reports based on what's statically knowable at each call site.
+apiwatch never executes your code. It parses source with the TypeScript compiler API, resolves HTTP client bindings (including ones imported across modules, including barrel index files, and instances built with `axios.create()`), and reports based on what's statically knowable at each call site.
 
 ## Rules
 
 | rule | severity | flags |
 |---|---|---|
-| `no-timeout` | error | call has no `timeout` option, no `AbortSignal.timeout()`, and no instance-level default |
-| `no-retry` | warn | idempotent call (`get`/`head`/`options`/`put`/`delete`) has no library-backed retry |
+| `no-timeout` | error | call has no `timeout` option, no `AbortSignal.timeout()`, and no instance-level default — also fires when the options object simply isn't statically readable, since that's indistinguishable from a genuinely absent timeout |
+| `no-retry` | warn | idempotent call (`get`/`head`/`options`/`put`/`delete`) has no library-backed retry — also flags a call whose method can't be statically determined at all, on the assumption that an unreadable method is safer to warn on than to silently skip; a property-access `.options()` call is never tracked as a call site in the first place, so it can only ever be flagged via an explicit `method: 'options'` in a bare call's config object |
 | `unvalidated-response` | warn | response body is used without reaching a schema validator (zod/Joi/yup/ajv/class-validator) |
-| `deprecated-client` | warn | file imports the unmaintained `request` package, or `node-fetch@2` |
+| `deprecated-client` | warn | file imports the unmaintained `request` or `request-promise` packages, or `node-fetch@2` |
 | `hardcoded-host` | warn | a literal, non-loopback host string is embedded in source |
 
 ## Limitations
@@ -81,6 +87,9 @@ Every one of these is a real, measured gap — not a hedge.
 - **`signal: controller.signal` is treated as protected.** A bare `AbortController` with no timeout ever attached to it is statically indistinguishable from one wired to `setTimeout(() => controller.abort(), ms)` elsewhere in the file, so `no-timeout` can stay silent on a fetch that's only manually cancellable, never time-bounded.
 - **Clients built by a factory function, or injected via DI other than `@nestjs/axios`, may be missed entirely** — a false negative, not a false positive.
 - **`unvalidated-response` stays silent when it can't follow the value.** Absence of a finding is not proof a response is validated. In the measured corpus, 132 of 148 sites were provably unvalidated and 16 were unknown-and-silent.
+- **Any `.parse()`/`.validate()`-named call in the enclosing function counts as validation**, as long as the file imports a validator library — apiwatch checks the call's own name and receiver, not that the value it's called on is actually the response. A response handed to some other `.parse()`-named call in the same function (not `JSON.parse`/`Date.parse`, which are explicitly excluded) can read as validated when it isn't.
+- **A client shared across CommonJS modules, or required lazily inside a function body, is resolved** — but a client passed around through less direct means (a factory function's return value, a namespace object's property, DI other than `@nestjs/axios`) may still be invisible, the same false-negative gap that already existed for ESM.
+- **`apiwatch audit` writes `.apiwatch/audit.md` into the audited repo root** as a side effect of every non-JSON run. This is undocumented elsewhere and not configurable in v0.1; the CLI degrades to a warning (instead of crashing) if the root is read-only.
 
 ## Roadmap
 
