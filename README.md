@@ -1,5 +1,10 @@
 # apiwatch
 
+[![CI](https://github.com/vishalsg42/apiwatch/actions/workflows/ci.yml/badge.svg)](https://github.com/vishalsg42/apiwatch/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/apiwatch.svg)](https://www.npmjs.com/package/apiwatch)
+[![license](https://img.shields.io/npm/l/apiwatch.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/apiwatch.svg)](https://nodejs.org)
+
 A zero-config CLI that statically audits outbound third-party HTTP calls in your Node/TypeScript repo: no timeout, no retry, no response validation, one AST pass, no code runs.
 
 ```
