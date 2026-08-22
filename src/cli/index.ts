@@ -2,6 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { CliIo } from '../model.js'
+import { runAudit } from './audit.js'
 
 const USAGE = `apiwatch — audit outbound third-party HTTP calls
 
@@ -29,7 +30,33 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     io.write(USAGE)
     return 0
   }
-  if (argv[0] === 'audit') return 0 // wired in Task 11
+  if (argv[0] === 'audit') {
+    const rest = argv.slice(1)
+    const flag = (name: string) => {
+      const i = rest.indexOf(name)
+      return i === -1 ? undefined : rest[i + 1]
+    }
+    const root = flag('--root') ? resolve(flag('--root') as string) : process.cwd()
+    const json = rest.includes('--json')
+    const failOnRaw = flag('--fail-on')
+    const failOn = failOnRaw === 'error' || failOnRaw === 'warn' ? failOnRaw : undefined
+    const result = await runAudit({ root, json, failOn })
+    io.write(result.output)
+    return result.code
+  }
   io.write(USAGE)
   return 1
+}
+
+// Entrypoint guard: invoke runCli only when this module is the program's main entry (running
+// as the built `dist/cli.js` bin, or directly via `node src/cli/index.ts` / tsx), not when it's
+// imported by tests. Without this the bin was inert — `apiwatch --version` printed nothing.
+const isMainEntry = () => {
+  const entry = process.argv[1]
+  if (!entry) return false
+  return import.meta.url === new URL(`file://${resolve(entry)}`).href
+}
+if (isMainEntry()) {
+  const code = await runCli(process.argv.slice(2), { write: (s) => process.stdout.write(s) })
+  process.exitCode = code
 }
