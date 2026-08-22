@@ -88,6 +88,10 @@ function mergeStats(into: CorpusStats, from: CorpusStats): void {
     into.byRule[rule] = (into.byRule[rule] ?? 0) + count
 }
 
+// Generous enough for a large monorepo on a slow link, short enough that one pathological
+// repo cannot hold up the rest of the corpus.
+const CLONE_TIMEOUT_MS = Number(process.env.APIWATCH_CLONE_TIMEOUT_MS ?? 5 * 60_000)
+
 async function main() {
   const argv = process.argv.slice(2)
   // `--skip <n>` drops the first n urls, so a run aborted partway can resume without
@@ -126,7 +130,13 @@ async function main() {
       const dest = join(base, `repo-${i}`)
       process.stderr.write(`[${n}/${urls.length}] cloning ${repoLabel(url)}\n`)
       try {
-        execFileSync('git', ['clone', '--depth', '1', '--quiet', url, dest], { stdio: 'ignore' })
+        // Cap the clone. aws-sdk-js-v3 stalled a 102 repo run indefinitely on the clone alone,
+        // so one oversized repo could block every repo behind it. A repo that cannot be
+        // fetched inside the cap is counted as failed, the same as an unclonable url.
+        execFileSync('git', ['clone', '--depth', '1', '--quiet', url, dest], {
+          stdio: 'ignore',
+          timeout: CLONE_TIMEOUT_MS,
+        })
       } catch {
         // an unclonable URL still gets counted: scanCorpus will find nothing at `dest` and
         // record it as a failed repo, same as any repo that fails to analyse.
