@@ -1,2 +1,8 @@
 import { defineConfig } from 'vitest/config'
-export default defineConfig({ test: { environment: 'node', testTimeout: 30_000 } })
+export default defineConfig({
+  test: {
+    environment: 'node',
+    testTimeout: 30_000,
+    exclude: ['node_modules', 'dist', '.idea', '.git', '.cache', 'test/fixtures/**'],
+  },
+})
