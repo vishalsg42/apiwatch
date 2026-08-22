@@ -1,0 +1,13 @@
+{
+  "name": "apiwatch", "version": "0.1.0", "type": "module",
+  "engines": { "node": ">=22" },
+  "bin": { "apiwatch": "./dist/cli.js" },
+  "exports": { ".": "./dist/cli.js" },
+  "files": ["dist"],
+  "scripts": { "build": "tsup", "test": "vitest run", "lint": "biome check ." },
+  "dependencies": { "ts-morph": "^28", "citty": "^0.2" },
+  "devDependencies": {
+    "vitest": "^4", "tsup": "^8", "typescript": "^7", "@biomejs/biome": "^2",
+    "@types/node": "^22", "tsx": "^4"
+  }
+}
