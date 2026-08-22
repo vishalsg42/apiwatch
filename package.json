@@ -1,20 +1,52 @@
 {
-  "name": "apiwatch", "version": "0.1.0", "type": "module",
+  "name": "apiwatch",
+  "version": "0.1.0",
+  "type": "module",
   "description": "Zero-config static audit of outbound third-party HTTP calls in a Node/TypeScript repo: no timeout, no retry, no response validation, one AST pass, no code runs.",
   "license": "MIT",
   "author": "Vishal Gupta",
   "homepage": "https://github.com/vishalsg42/apiwatch#readme",
-  "repository": { "type": "git", "url": "git+https://github.com/vishalsg42/apiwatch.git" },
-  "keywords": ["http", "audit", "static-analysis", "timeout", "retry", "typescript", "cli"],
-  "engines": { "node": ">=22" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vishalsg42/apiwatch.git"
+  },
+  "keywords": [
+    "http",
+    "audit",
+    "static-analysis",
+    "timeout",
+    "retry",
+    "typescript",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@11.8.0",
-  "bin": { "apiwatch": "./dist/cli.js" },
-  "exports": { ".": "./dist/cli.js" },
-  "files": ["dist"],
-  "scripts": { "build": "tsup", "test": "vitest run", "lint": "biome check ." },
-  "dependencies": { "ts-morph": "^28", "citty": "^0.2" },
+  "bin": {
+    "apiwatch": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "ts-morph": "^28",
+    "citty": "^0.2"
+  },
   "devDependencies": {
-    "vitest": "^4", "tsup": "^8", "typescript": "^7", "@biomejs/biome": "^2",
-    "@types/node": "^22", "tsx": "^4"
+    "vitest": "^4",
+    "tsup": "^8",
+    "typescript": "^7",
+    "@biomejs/biome": "^2",
+    "@types/node": "^22",
+    "tsx": "^4"
   }
 }
