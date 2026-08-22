@@ -3,9 +3,10 @@
 // identity retained) and a false-positive smoke test at scale. scanCorpus only ever touches
 // local directories — cloning a URL list into a temp dir is main()'s job, not this function's.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, statSync } from 'node:fs'
+import { mkdtempSync, realpathSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { runAudit } from '../src/cli/audit.js'
 import type { CorpusStats } from '../src/model.js'
 
@@ -74,9 +75,15 @@ async function main() {
 
 // Entrypoint guard, mirroring src/cli/index.ts: run main() only when this file is the
 // program's main entry (`pnpm tsx scripts/scan-corpus.ts ...`), never when imported by tests.
+// Must realpath argv[1] before comparing — Node's ESM loader realpaths the module it loads, so
+// import.meta.url is already a realpath, and a symlinked invocation would otherwise never match.
 const isMainEntry = () => {
   const entry = process.argv[1]
   if (!entry) return false
-  return import.meta.url === new URL(`file://${resolve(entry)}`).href
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href
+  } catch {
+    return false
+  }
 }
 if (isMainEntry()) await main()

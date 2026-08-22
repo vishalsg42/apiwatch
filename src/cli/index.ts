@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type { CliIo } from '../model.js'
 import { runAudit } from './audit.js'
 
@@ -51,10 +52,22 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 // Entrypoint guard: invoke runCli only when this module is the program's main entry (running
 // as the built `dist/cli.js` bin, or directly via `node src/cli/index.ts` / tsx), not when it's
 // imported by tests. Without this the bin was inert — `apiwatch --version` printed nothing.
+//
+// npm links a bin as a SYMLINK. `process.argv[1]` is the symlink path, and `path.resolve` does
+// not follow symlinks — but Node's ESM loader realpaths the module it loads, so `import.meta.url`
+// is already the REALPATH. Comparing a resolved-but-not-realpathed argv[1] against a realpathed
+// import.meta.url never matches when running through a symlinked bin (i.e. every real `npm
+// install` of this package), so the guard silently failed and the CLI did nothing. Realpathing
+// argv[1] here fixes that. `pathToFileURL` (rather than manual `file://` string-building) also
+// fixes Windows, where a manually built `file://C:\...` URL is malformed.
 const isMainEntry = () => {
   const entry = process.argv[1]
   if (!entry) return false
-  return import.meta.url === new URL(`file://${resolve(entry)}`).href
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href
+  } catch {
+    return false
+  }
 }
 if (isMainEntry()) {
   const code = await runCli(process.argv.slice(2), { write: (s) => process.stdout.write(s) })
