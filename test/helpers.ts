@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { SourceFile } from 'ts-morph'
 import type { CallSite, Workspace } from '../src/model.js'
+import { findCallSites } from '../src/static/callsites.js'
 import { createProjects } from '../src/static/project.js'
 import { buildRegistry, resolveClients } from '../src/static/registry.js'
 import { discoverWorkspace } from '../src/workspace/discover.js'
@@ -34,6 +35,15 @@ export async function clientsFor(fixture: string, file: string) {
     .flatMap((p) => p.project.getSourceFiles())
     .find((s) => s.getFilePath().endsWith(file)) as SourceFile
   return resolveClients(sf, registry)
+}
+
+export async function sitesFor(fixture: string, file: string) {
+  const { w, projects } = await projectsFor(fixture)
+  const registry = buildRegistry(projects)
+  const sf = projects
+    .flatMap((p) => p.project.getSourceFiles())
+    .find((s) => s.getFilePath().endsWith(file)) as SourceFile
+  return findCallSites(sf, resolveClients(sf, registry), w)
 }
 
 export const site = (over: Partial<CallSite> = {}): CallSite => ({
