@@ -5,7 +5,12 @@ export function createProjects(ws: Workspace) {
   const dirs = [...ws.packageDirs].sort((a, b) => b.length - a.length) // deepest wins
   const owner = (f: string) => dirs.find((d) => f.startsWith(`${d}/`)) ?? ws.root
   const byDir = new Map<string, string[]>()
-  for (const f of ws.sourceFiles) byDir.set(owner(f), [...(byDir.get(owner(f)) ?? []), f])
+  for (const f of ws.sourceFiles) {
+    const d = owner(f)
+    const arr = byDir.get(d)
+    if (arr) arr.push(f)
+    else byDir.set(d, [f])
+  }
 
   return [...byDir].map(([dir, files]) => {
     const project = new Project({

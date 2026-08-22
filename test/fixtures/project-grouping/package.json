@@ -1,0 +1,5 @@
+{
+  "name": "project-grouping-fixture",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

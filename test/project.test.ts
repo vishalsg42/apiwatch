@@ -16,4 +16,16 @@ describe('createProjects', () => {
       false,
     )
   })
+  it('groups files into the correct project directory, each with the expected files in order', async () => {
+    const projects = createProjects(await discoverWorkspace(fx('project-grouping')))
+    const named = (dirSuffix: string) => {
+      const found = projects.find(({ dir }) => dir.endsWith(dirSuffix))
+      if (!found) throw new Error(`no project for ${dirSuffix}`)
+      return found.project.getSourceFiles().map((f) => f.getFilePath().split('/').pop())
+    }
+    // ws.sourceFiles is globally sorted before grouping, so within each dir the files come
+    // out in alphabetical order: one, three, two (not insertion order one, two, three).
+    expect(named('packages/alpha')).toEqual(['one.ts', 'three.ts', 'two.ts'])
+    expect(named('packages/beta')).toEqual(['x.ts', 'y.ts'])
+  })
 })
