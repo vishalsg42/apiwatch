@@ -72,6 +72,7 @@ export type Workspace = {
   sourceFiles: string[] // absolute, posix
   packageDirs: string[] // absolute, posix
   dependencies: Record<string, string> // merged deps+devDeps across all package.json files; on key collision the last file walked wins (non-deterministic in a monorepo)
+  nonShippingFilesExcluded: number // source files under examples/, benchmarks/, docs/ and the like that were left unaudited; 0 when includeNonShipping is set
 }
 
 export type ReportModel = {
@@ -80,6 +81,7 @@ export type ReportModel = {
   filesSkipped: number
   callSiteCount: number
   unresolvedHostCount: number
+  nonShippingFilesExcluded: number
   countsByRule: Record<string, number>
   findings: Finding[]
 }

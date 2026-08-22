@@ -8,8 +8,14 @@ export function renderMarkdown(m: ReportModel): string {
   L.push(
     `analysed ${m.filesAnalysed - m.filesSkipped} of ${m.filesAnalysed} files · ` +
       `${m.callSiteCount} outbound call sites`,
-    '',
   )
+  if (m.nonShippingFilesExcluded > 0)
+    L.push(
+      '',
+      `Skipped ${m.nonShippingFilesExcluded} files in example/benchmark/doc directories. ` +
+        'Run with `--include-non-shipping` to audit them.',
+    )
+  L.push('')
 
   L.push('## Summary', '')
   L.push('| rule | severity | count |', '| --- | --- | --- |')

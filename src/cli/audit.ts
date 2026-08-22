@@ -15,6 +15,8 @@ export type AuditOptions = {
   root: string
   json?: boolean
   failOn?: 'error' | 'warn'
+  /** Audit sample code, benchmarks and docs alongside shipped code. Off by default. */
+  includeNonShipping?: boolean
   // v0.2 will run a target command (e.g. `npm run dev`) to resolve hosts that come from
   // runtime config; unused in v0.1 but the option is declared now so the signature never
   // needs to change once that lands.
@@ -24,7 +26,9 @@ export type AuditOptions = {
 export async function runAudit(
   opts: AuditOptions,
 ): Promise<{ code: number; output: string; model: ReportModel; sites: CallSite[] }> {
-  const ws = await discoverWorkspace(opts.root)
+  const ws = await discoverWorkspace(opts.root, {
+    includeNonShipping: opts.includeNonShipping,
+  })
   const projects = createProjects(ws)
   const registry = buildRegistry(projects)
   const sites: CallSite[] = []
@@ -45,6 +49,7 @@ export async function runAudit(
     sites,
     filesAnalysed: ws.sourceFiles.length,
     filesSkipped,
+    nonShippingFilesExcluded: ws.nonShippingFilesExcluded,
   })
   let output = opts.json ? renderJson(model) : renderTty(model)
 

@@ -7,7 +7,13 @@ import { runRules } from '../src/rules/index.js'
 import { site, ws } from './helpers.js'
 
 const model = (sites = [site()]) =>
-  buildReport({ findings: runRules(sites, ws), sites, filesAnalysed: 10, filesSkipped: 0 })
+  buildReport({
+    findings: runRules(sites, ws),
+    sites,
+    filesAnalysed: 10,
+    filesSkipped: 0,
+    nonShippingFilesExcluded: 0,
+  })
 
 describe('reporters', () => {
   it('counts findings by rule', () => expect(model().countsByRule['no-timeout']).toBe(1))

@@ -10,8 +10,18 @@ export function renderTty(m: ReportModel): string {
   L.push(
     `  analysed ${m.filesAnalysed - m.filesSkipped} of ${m.filesAnalysed} files · ` +
       `${m.callSiteCount} outbound call sites`,
-    '',
   )
+  // Say what was left out. An exclusion the reader cannot see is indistinguishable from a
+  // rule that found nothing, and silent suppression is the harder defect to notice.
+  if (m.nonShippingFilesExcluded > 0)
+    L.push(
+      c(
+        '2',
+        `  skipped ${m.nonShippingFilesExcluded} files in example/benchmark/doc dirs ` +
+          `(--include-non-shipping to audit them)`,
+      ),
+    )
+  L.push('')
   // The counts-by-rule summary always covers every finding, even when the detail
   // list below is capped: a repo with hundreds of findings still gets an honest total.
   for (const [rule, n] of Object.entries(m.countsByRule)) {

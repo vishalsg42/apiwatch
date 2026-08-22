@@ -5,6 +5,7 @@ export function buildReport(input: {
   sites: CallSite[]
   filesAnalysed: number
   filesSkipped: number
+  nonShippingFilesExcluded: number
 }): ReportModel {
   const countsByRule: Record<string, number> = {}
   for (const f of input.findings) countsByRule[f.rule] = (countsByRule[f.rule] ?? 0) + 1
@@ -15,6 +16,7 @@ export function buildReport(input: {
     filesSkipped: input.filesSkipped,
     callSiteCount: input.sites.length,
     unresolvedHostCount: input.sites.filter((s) => s.url.kind !== 'literal').length,
+    nonShippingFilesExcluded: input.nonShippingFilesExcluded,
     countsByRule,
     findings: input.findings,
   }

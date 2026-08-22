@@ -23,6 +23,7 @@ export const ws: Workspace = {
   sourceFiles: [],
   packageDirs: ['/repo'],
   dependencies: {},
+  nonShippingFilesExcluded: 0,
 }
 
 export async function projectsFor(fixture: string) {

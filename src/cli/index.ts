@@ -8,6 +8,10 @@ import { runAudit } from './audit.js'
 const USAGE = `apiwatch: audit outbound third-party HTTP calls
 
   apiwatch audit [--root <dir>] [--json] [--fail-on error|warn]
+                 [--include-non-shipping]
+
+  --include-non-shipping  also audit example/, benchmark/, docs/ and similar
+                          directories, which are skipped by default
 `
 const version = () => {
   // dist/cli.js (built) sits one level below repo root; src/cli/index.ts (dev/test,
@@ -41,7 +45,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     const json = rest.includes('--json')
     const failOnRaw = flag('--fail-on')
     const failOn = failOnRaw === 'error' || failOnRaw === 'warn' ? failOnRaw : undefined
-    const result = await runAudit({ root, json, failOn })
+    const includeNonShipping = rest.includes('--include-non-shipping')
+    const result = await runAudit({ root, json, failOn, includeNonShipping })
     io.write(result.output)
     return result.code
   }
