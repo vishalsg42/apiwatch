@@ -15,7 +15,7 @@ describe('classifyUrl', () => {
   it('classifies process.env as env', () =>
     expect(classify('process.env.CRM_URL').kind).toBe('env'))
   it('reads the host from a template literal prefix', () =>
-    expect(classify('`https://api.x.dev/v1/${id}`')).toMatchObject({
+    expect(classify(`\`https://api.x.dev/v1/\${id}\``)).toMatchObject({
       kind: 'literal',
       host: 'api.x.dev',
     }))

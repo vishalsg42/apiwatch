@@ -1,6 +1,7 @@
 {
   "name": "apiwatch", "version": "0.1.0", "type": "module",
   "engines": { "node": ">=22" },
+  "packageManager": "pnpm@11.8.0",
   "bin": { "apiwatch": "./dist/cli.js" },
   "exports": { ".": "./dist/cli.js" },
   "files": ["dist"],

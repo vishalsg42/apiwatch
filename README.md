@@ -31,11 +31,23 @@ Real output from `apiwatch audit` against a production credit-bureau integration
   ⚠ deprecated-client         5
 
   src/proxy/vendor.js:77       request call has no timeout and can hang indefinitely
-  src/services/notify.js:32     request-promise call has no timeout and can hang indefinitely
+  src/services/notify.js:32    request-promise call has no timeout and can hang indefinitely
   src/proxy/client.js:108      `request` is unmaintained since 2020
 ```
 
 Across five production services, the tool measured **148 outbound call sites: 13 with a timeout (8.8%), 0 with retry (0.0%), 0 validating the response.** That is not a cherry-picked repo — it is the default state of hand-rolled HTTP calls in real backends.
+
+## Installation
+
+This project uses [pnpm](https://pnpm.io). To install dependencies and run commands:
+
+```
+pnpm install
+pnpm test
+pnpm build
+```
+
+(Running `npm install` is not supported — the lockfile and `node_modules` layout are managed by pnpm.)
 
 ## Usage
 
