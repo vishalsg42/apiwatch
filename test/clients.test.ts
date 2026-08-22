@@ -27,4 +27,27 @@ describe('client bindings', () => {
   })
   it('detects the NestJS HttpService', async () =>
     expect((await clientsFor('nestjs', 'svc.ts')).get('httpService')?.kind).toBe('nestjs-axios'))
+  it('does NOT treat a nested timeout (e.g. on httpsAgent) as the instance timeout', async () => {
+    const b = (await clientsFor('axios-nested-timeout', 'svc.ts')).get('api')
+    expect(b?.instanceTimeout).toBe(false)
+  })
+  it('treats shorthand { timeout } as setting the instance timeout', async () => {
+    const b = (await clientsFor('axios-shorthand-timeout', 'svc.ts')).get('api')
+    expect(b?.instanceTimeout).toBe(true)
+  })
+  it('registers a binding derived from a class field', async () => {
+    const b = (await clientsFor('axios-class-field', 'svc.ts')).get('api')
+    expect(b?.kind).toBe('axios')
+    expect(b?.instanceTimeout).toBe(true)
+  })
+  it('registers a binding derived from a this.x assignment', async () => {
+    const b = (await clientsFor('axios-this-assign', 'svc.ts')).get('api')
+    expect(b?.kind).toBe('axios')
+    expect(b?.instanceTimeout).toBe(true)
+  })
+  it('resolves a client imported from a barrel (index) module', async () => {
+    const b = (await clientsFor('shared-client-index', 'payments.ts')).get('api')
+    expect(b?.kind).toBe('axios')
+    expect(b?.instanceTimeout).toBe(true)
+  })
 })

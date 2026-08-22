@@ -23,7 +23,8 @@ export function resolveClients(sf: SourceFile, reg: Map<string, ClientBinding>) 
     if (!spec.startsWith('.')) continue
     const target = stripExt(resolve(dirname(sf.getFilePath()), spec))
     for (const n of d.getNamedImports()) {
-      const hit = reg.get(key(target, n.getName()))
+      // a relative specifier may resolve directly (./http) or via a barrel (./http/index)
+      const hit = reg.get(key(target, n.getName())) ?? reg.get(key(`${target}/index`, n.getName()))
       if (hit) local.set(n.getAliasNode()?.getText() ?? n.getName(), hit)
     }
   }
