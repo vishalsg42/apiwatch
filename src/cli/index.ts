@@ -21,8 +21,15 @@ const version = () => {
 }
 
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
-  if (argv.includes('--version')) { io.write(version() + '\n'); return 0 }
-  if (argv.length === 0 || argv.includes('--help')) { io.write(USAGE); return 0 }
-  if (argv[0] === 'audit') return 0            // wired in Task 11
-  io.write(USAGE); return 1
+  if (argv.includes('--version')) {
+    io.write(`${version()}\n`)
+    return 0
+  }
+  if (argv.length === 0 || argv.includes('--help')) {
+    io.write(USAGE)
+    return 0
+  }
+  if (argv[0] === 'audit') return 0 // wired in Task 11
+  io.write(USAGE)
+  return 1
 }
