@@ -3,8 +3,6 @@ import type { CallOptions, ClientBinding } from '../model.js'
 import { collectFileImports } from './imports.js'
 
 const RETRY_LIBS = ['axios-retry', 'p-retry', 'async-retry', 'retry-axios']
-const objArgs = (c: CallExpression) =>
-  c.getArguments().filter((a) => a.getKind() === SyntaxKind.ObjectLiteralExpression)
 
 /**
  * Looks up an object literal's OWN top-level property by name, accepting both a regular
@@ -25,13 +23,71 @@ const prop = (n: Node, name: string): PropLookup | undefined => {
   return init ? { shorthand: false, initializer: init } : undefined
 }
 
+/**
+ * The call's own method name — a property-access call's property name, normalized
+ * (`.del()` -> `delete`) — or undefined for a bare call (`axios(...)`, `fetch(...)`,
+ * `got(...)`, `request(...)`). `resolveOptions` isn't handed the method callsites.ts already
+ * extracted (that signature is owned elsewhere), so it's recomputed here the same way.
+ */
+function methodOf(call: CallExpression): string | undefined {
+  const expr = call.getExpression()
+  if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) return undefined
+  const name = expr.asKindOrThrow(SyntaxKind.PropertyAccessExpression).getName()
+  return name === 'del' ? 'delete' : name
+}
+
+/**
+ * The argument index that holds this call's options/config object, decided from the client
+ * kind and method shape — NOT "the last object-literal argument". That rule is wrong for
+ * `axios.post(url, data)` with no config: the request BODY is the last (and only) object
+ * literal there, and reading options from it turns a domain field like `{ retry: true }` in
+ * the body into a false 'library' verdict, or a body field named `timeout` into a false
+ * suppression of no-timeout. Returns undefined for a shape that isn't a known request-options
+ * convention, so the caller treats the call as having no statically-readable options rather
+ * than guessing at one.
+ */
+function configArgIndex(
+  kind: ClientBinding['kind'],
+  method: string | undefined,
+): number | undefined {
+  switch (kind) {
+    case 'axios':
+    case 'nestjs-axios':
+      if (method === undefined || method === 'request') return 0 // axios(config) / axios.request(config)
+      if (method === 'get' || method === 'delete' || method === 'head') return 1
+      if (method === 'post' || method === 'put' || method === 'patch') return 2
+      return undefined
+    case 'fetch':
+    case 'node-fetch':
+      return method === undefined ? 1 : undefined // fetch(url, init)
+    case 'got':
+      return method === undefined ? 1 : undefined // got(url, options)
+    case 'request':
+    case 'request-promise':
+      return method === undefined ? 0 : undefined // request(options, cb)
+    case 'node:http':
+      return method === 'request' ? 0 : undefined // http.request(options, cb)
+    default:
+      return undefined
+  }
+}
+
+/** The call's single options/config object literal, or undefined if unreadable or absent. */
+function configObj(call: CallExpression, binding: ClientBinding): Node | undefined {
+  const idx = configArgIndex(binding.kind, methodOf(call))
+  if (idx === undefined) return undefined
+  const arg = call.getArguments()[idx]
+  return arg && arg.getKind() === SyntaxKind.ObjectLiteralExpression ? arg : undefined
+}
+
 export function resolveOptions(
   call: CallExpression,
   binding: ClientBinding,
 ): Pick<CallOptions, 'timeoutMs' | 'retry'> {
   let timeoutMs: CallOptions['timeoutMs'] = null
-  for (const o of objArgs(call)) {
-    const t = prop(o, 'timeout')
+  const config = configObj(call, binding)
+  if (config) {
+    const t = prop(config, 'timeout')
     if (t) {
       if (!t.shorthand && t.initializer.getKind() === SyntaxKind.NumericLiteral) {
         const n = Number(t.initializer.getText())
@@ -44,15 +100,14 @@ export function resolveOptions(
         // configured but its value isn't statically known here.
         timeoutMs = 'instance-default'
       }
-      break
-    }
-    const sig = prop(o, 'signal')
-    if (sig) {
-      const m = !sig.shorthand
-        ? /AbortSignal\.timeout\(\s*(\d+)\s*\)/.exec(sig.initializer.getText())
-        : null
-      timeoutMs = m ? Number(m[1]) : 'instance-default'
-      break
+    } else {
+      const sig = prop(config, 'signal')
+      if (sig) {
+        const m = !sig.shorthand
+          ? /AbortSignal\.timeout\(\s*(\d+)\s*\)/.exec(sig.initializer.getText())
+          : null
+        timeoutMs = m ? Number(m[1]) : 'instance-default'
+      }
     }
   }
   if (timeoutMs === null && binding.instanceTimeout) timeoutMs = 'instance-default'
@@ -62,7 +117,7 @@ export function resolveOptions(
   if (retry === 'none') {
     const imports = collectFileImports(call.getSourceFile())
     if (imports.some((i) => RETRY_LIBS.includes(i))) retry = 'library'
-    else if (objArgs(call).some((o) => prop(o, 'retry') || prop(o, 'retries'))) retry = 'library'
+    else if (config && (prop(config, 'retry') || prop(config, 'retries'))) retry = 'library'
     // A `for`/`while` ancestor was previously treated as a hand-rolled retry loop and mapped
     // to 'manual'. Measured against a real repo, this was wrong: a `while (hasMore) { try {
     // ... } catch {} }` pagination loop is structurally identical to a retry loop, and 23.7%

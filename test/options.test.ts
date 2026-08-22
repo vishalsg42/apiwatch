@@ -45,4 +45,26 @@ describe('resolveOptions', () => {
   // for/while ancestor must never promote retry above 'none' on its own.
   it('does not treat a pagination loop as manual retry', async () =>
     expect((await siteAt('pagination-loop', 'svc.ts', /axios\.get/)).options.retry).toBe('none'))
+  // Regression: options used to be read by scanning EVERY object-literal argument, so a
+  // domain field in the request BODY collided with a real option name. The config argument
+  // must be selected by POSITION (client kind + method), never "the last object literal" —
+  // which is exactly wrong for a bodyless `axios.post(url, data)`.
+  it('does not mistake a retry-shaped body field for retry config', async () =>
+    expect((await siteAt('body-collision-retry', 'svc.ts', /axios\.post/)).options.retry).toBe(
+      'none',
+    ))
+  it('does not mistake a timeout-shaped body field for a configured timeout', async () =>
+    expect(
+      (await siteAt('body-collision-timeout', 'svc.ts', /axios\.post/)).options.timeoutMs,
+    ).toBeNull())
+  it('reads the real config argument, not the body, when both set timeout', async () =>
+    expect(
+      (await siteAt('body-and-config-timeout', 'svc.ts', /axios\.post/)).options.timeoutMs,
+    ).toBe(3000))
+  it('still reads an inline timeout on axios.get (config at index 1)', async () =>
+    expect((await siteAt('axios-get-timeout', 'svc.ts', /axios\.get/)).options.timeoutMs).toBe(
+      3000,
+    ))
+  it('reads a timeout from a bare axios(config) call (config at index 0)', async () =>
+    expect((await siteAt('axios-bare-timeout', 'svc.ts', /axios\(/)).options.timeoutMs).toBe(3000))
 })
