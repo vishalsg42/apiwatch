@@ -1,14 +1,19 @@
 import { createHash } from 'node:crypto'
 import {
+  type ArrayBindingPattern,
   type ArrowFunction,
+  type BindingElement,
   type Block,
   type CallExpression,
+  type CatchClause,
   type ConstructorDeclaration,
   type FunctionDeclaration,
   type FunctionExpression,
   type GetAccessorDeclaration,
   type MethodDeclaration,
   type Node,
+  type ObjectBindingPattern,
+  type ParameterDeclaration,
   type SetAccessorDeclaration,
   type SourceFile,
   type StringLiteral,
@@ -41,10 +46,37 @@ const FN_LIKE_KINDS = new Set([
 ])
 
 /**
+ * Whether a parameter binds the name `fetch`. `ParameterDeclaration.getName()` returns the
+ * PATTERN SOURCE TEXT for a destructured parameter (e.g. `"{ fetch }"`, not `"fetch"`), so a
+ * destructured shape must be unpacked via its name node instead — walking `BindingElement`s
+ * covers both `{ fetch }` and a renamed-into `{ http: fetch }` (the bound local name, not the
+ * property name, is what matters for a bare `fetch(...)` call).
+ */
+function paramDeclaresFetch(p: ParameterDeclaration): boolean {
+  const nameNode = p.getNameNode()
+  const kind = nameNode.getKind()
+  if (kind === SyntaxKind.ObjectBindingPattern || kind === SyntaxKind.ArrayBindingPattern) {
+    const pattern = nameNode as ObjectBindingPattern | ArrayBindingPattern
+    return pattern
+      .getElements()
+      .some(
+        (el) =>
+          el.getKind() === SyntaxKind.BindingElement &&
+          (el as BindingElement).getName() === 'fetch',
+      )
+  }
+  return kind === SyntaxKind.Identifier && nameNode.getText() === 'fetch'
+}
+
+/**
  * Whether the given node itself (not its descendants) declares a binding named `fetch` —
- * either as a function parameter, or as a variable declared directly in this block/source
- * file (not one nested inside a deeper block). Used to walk a call's ancestors and decide,
- * purely syntactically, whether a particular `fetch(...)` call is locally shadowed.
+ * a function parameter (including a destructured one), a variable or function declared
+ * directly in this block/source file (not one nested inside a deeper block — a function
+ * declaration is a scope-level binding just like `var`/`let`/`const`, so this also covers
+ * a call site inside the shadowing function's own body, i.e. recursion), a named function
+ * expression's own self-reference, or a `catch` clause's bound name. Used to walk a call's
+ * ancestors and decide, purely syntactically, whether a particular `fetch(...)` call is
+ * locally shadowed.
  */
 function declaresFetch(node: Node): boolean {
   const kind = node.getKind()
@@ -57,11 +89,21 @@ function declaresFetch(node: Node): boolean {
       | ConstructorDeclaration
       | GetAccessorDeclaration
       | SetAccessorDeclaration
-    if (fn.getParameters().some((p) => p.getName() === 'fetch')) return true
+    if (fn.getParameters().some(paramDeclaresFetch)) return true
+    if (
+      (kind === SyntaxKind.FunctionDeclaration || kind === SyntaxKind.FunctionExpression) &&
+      (fn as FunctionDeclaration | FunctionExpression).getName() === 'fetch'
+    )
+      return true
   }
   if (kind === SyntaxKind.Block || kind === SyntaxKind.SourceFile) {
     const scope = node as Block | SourceFile
     if (scope.getVariableDeclarations().some((d) => d.getName() === 'fetch')) return true
+    if (scope.getFunctions().some((f) => f.getName() === 'fetch')) return true
+  }
+  if (kind === SyntaxKind.CatchClause) {
+    const cc = node as CatchClause
+    if (cc.getVariableDeclaration()?.getName() === 'fetch') return true
   }
   return false
 }
@@ -93,7 +135,8 @@ export function findCallSites(
   ws: Workspace,
 ): CallSite[] {
   const abs = sf.getFilePath() as string
-  const file = abs.startsWith(`${ws.root}/`) ? abs.slice(ws.root.length + 1) : abs
+  const root = ws.root.endsWith('/') ? ws.root.slice(0, -1) : ws.root // a user-supplied --root may carry a trailing slash
+  const file = abs.startsWith(`${root}/`) ? abs.slice(root.length + 1) : abs
   const fileImports = collectFileImports(sf)
   const out: CallSite[] = []
 
