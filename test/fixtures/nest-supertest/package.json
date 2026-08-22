@@ -1,0 +1,7 @@
+{
+  "name": "nest-supertest",
+  "version": "1.0.0",
+  "dependencies": {
+    "supertest": "^6.3.0"
+  }
+}

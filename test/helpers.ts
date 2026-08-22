@@ -1,7 +1,11 @@
 import { cpSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { SourceFile } from 'ts-morph'
 import type { CallSite, Workspace } from '../src/model.js'
+import { createProjects } from '../src/static/project.js'
+import { buildRegistry, resolveClients } from '../src/static/registry.js'
+import { discoverWorkspace } from '../src/workspace/discover.js'
 
 export const repoRoot = resolve(import.meta.dirname, '..')
 export const fx = (name: string) => resolve(import.meta.dirname, 'fixtures', name)
@@ -17,6 +21,19 @@ export const ws: Workspace = {
   sourceFiles: [],
   packageDirs: ['/repo'],
   dependencies: {},
+}
+
+export async function projectsFor(fixture: string) {
+  const w = await discoverWorkspace(fx(fixture))
+  return { w, projects: createProjects(w) }
+}
+export async function clientsFor(fixture: string, file: string) {
+  const { projects } = await projectsFor(fixture)
+  const registry = buildRegistry(projects)
+  const sf = projects
+    .flatMap((p) => p.project.getSourceFiles())
+    .find((s) => s.getFilePath().endsWith(file)) as SourceFile
+  return resolveClients(sf, registry)
 }
 
 export const site = (over: Partial<CallSite> = {}): CallSite => ({
