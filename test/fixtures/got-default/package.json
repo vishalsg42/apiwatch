@@ -1,0 +1,7 @@
+{
+  "name": "got-default",
+  "version": "1.0.0",
+  "dependencies": {
+    "got": "^13.0.0"
+  }
+}

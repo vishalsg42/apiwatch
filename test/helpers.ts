@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync } from 'node:fs'
+import { cpSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { SourceFile } from 'ts-morph'
@@ -44,6 +44,14 @@ export async function sitesFor(fixture: string, file: string) {
     .flatMap((p) => p.project.getSourceFiles())
     .find((s) => s.getFilePath().endsWith(file)) as SourceFile
   return findCallSites(sf, resolveClients(sf, registry), w)
+}
+
+export async function siteAt(fixture: string, file: string, match: RegExp) {
+  const sites = await sitesFor(fixture, file)
+  const src = readFileSync(`${fx(fixture)}/src/${file}`, 'utf8').split('\n')
+  const hit = sites.find((s) => match.test(src[s.line - 1] ?? ''))
+  if (!hit) throw new Error(`no call site matching ${match} in ${fixture}/${file}`)
+  return hit
 }
 
 export const site = (over: Partial<CallSite> = {}): CallSite => ({
