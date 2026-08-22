@@ -1,11 +1,12 @@
 import { cpSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { SourceFile } from 'ts-morph'
+import { Project, type SourceFile } from 'ts-morph'
 import type { CallSite, Workspace } from '../src/model.js'
 import { findCallSites } from '../src/static/callsites.js'
 import { createProjects } from '../src/static/project.js'
 import { buildRegistry, resolveClients } from '../src/static/registry.js'
+import { classifyUrl } from '../src/static/urls.js'
 import { discoverWorkspace } from '../src/workspace/discover.js'
 
 export const repoRoot = resolve(import.meta.dirname, '..')
@@ -52,6 +53,13 @@ export async function siteAt(fixture: string, file: string, match: RegExp) {
   const hit = sites.find((s) => match.test(src[s.line - 1] ?? ''))
   if (!hit) throw new Error(`no call site matching ${match} in ${fixture}/${file}`)
   return hit
+}
+
+export function classify(exprText: string | undefined) {
+  if (exprText === undefined) return classifyUrl(undefined)
+  const p = new Project({ useInMemoryFileSystem: true })
+  const sf = p.createSourceFile('t.ts', `const x = ${exprText}`)
+  return classifyUrl(sf.getVariableDeclarationOrThrow('x').getInitializer())
 }
 
 export const site = (over: Partial<CallSite> = {}): CallSite => ({
