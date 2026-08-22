@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 // Public-corpus scanner: the launch dataset (aggregate stats over public repos, no per-repo
 // identity retained) and a false-positive smoke test at scale. scanCorpus only ever touches
-// local directories; cloning a URL list into a temp dir is main()'s job, not this function's.
+// local directories; cloning a URL list into a temp dir, and removing it again, is main()'s
+// job, not this function's: scanCorpus takes directories it does not own and must never
+// delete them.
+//
+// main() removes its temp clone directory when it finishes, success or failure. Set
+// APIWATCH_KEEP_CLONES=1 to keep the clones around, e.g. to inspect a specific repo's
+// results after the run.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, realpathSync, statSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -58,6 +64,30 @@ export async function scanCorpus(repoDirs: string[]): Promise<CorpusStats> {
   return stats
 }
 
+// Best-effort "owner/name" label for progress output, e.g.
+// "https://github.com/koajs/koa.git" -> "koajs/koa". Falls back to the raw url when it does
+// not look like a typical hosted git url.
+function repoLabel(url: string): string {
+  const stripped = url.replace(/\.git$/, '')
+  const parts = stripped.split(/[/:]/).filter(Boolean)
+  return parts.length >= 2 ? parts.slice(-2).join('/') : url
+}
+
+// Combines a single repo's CorpusStats into a running total, in place. Kept out of
+// scanCorpus itself so that function's per-array-of-dirs contract stays untouched; this is
+// only needed because main() now runs scanCorpus once per repo to get per-repo progress.
+function mergeStats(into: CorpusStats, from: CorpusStats): void {
+  into.repos += from.repos
+  into.reposFailed += from.reposFailed
+  into.callSites += from.callSites
+  into.withTimeout += from.withTimeout
+  into.withRetry += from.withRetry
+  into.withValidation += from.withValidation
+  into.unreadable += from.unreadable
+  for (const [rule, count] of Object.entries(from.byRule))
+    into.byRule[rule] = (into.byRule[rule] ?? 0) + count
+}
+
 async function main() {
   const urls = process.argv.slice(2)
   if (urls.length === 0) {
@@ -66,21 +96,42 @@ async function main() {
     return
   }
 
+  const keepClones = process.env.APIWATCH_KEEP_CLONES === '1'
   const base = mkdtempSync(join(tmpdir(), 'apiwatch-corpus-'))
-  const dirs: string[] = []
-  for (const [i, url] of urls.entries()) {
-    const dest = join(base, `repo-${i}`)
-    try {
-      execFileSync('git', ['clone', '--depth', '1', '--quiet', url, dest], { stdio: 'ignore' })
-    } catch {
-      // an unclonable URL still gets counted: scanCorpus will find nothing at `dest` and
-      // record it as a failed repo, same as any repo that fails to analyse.
+  try {
+    const stats: CorpusStats = {
+      repos: 0,
+      reposFailed: 0,
+      callSites: 0,
+      withTimeout: 0,
+      withRetry: 0,
+      withValidation: 0,
+      unreadable: 0,
+      byRule: {},
     }
-    dirs.push(dest)
-  }
 
-  const stats = await scanCorpus(dirs)
-  process.stdout.write(`${JSON.stringify(stats, null, 2)}\n`)
+    for (const [i, url] of urls.entries()) {
+      const n = i + 1
+      const dest = join(base, `repo-${i}`)
+      process.stderr.write(`[${n}/${urls.length}] cloning ${repoLabel(url)}\n`)
+      try {
+        execFileSync('git', ['clone', '--depth', '1', '--quiet', url, dest], { stdio: 'ignore' })
+      } catch {
+        // an unclonable URL still gets counted: scanCorpus will find nothing at `dest` and
+        // record it as a failed repo, same as any repo that fails to analyse.
+      }
+
+      const result = await scanCorpus([dest])
+      mergeStats(stats, result)
+      process.stderr.write(`[${n}/${urls.length}] scanned: ${result.callSites} sites\n`)
+    }
+
+    // Print before cleanup, not after: stats must reach stdout even though the finally
+    // block below always runs, success or failure.
+    process.stdout.write(`${JSON.stringify(stats, null, 2)}\n`)
+  } finally {
+    if (!keepClones) rmSync(base, { recursive: true, force: true })
+  }
 }
 
 // Entrypoint guard, mirroring src/cli/index.ts: run main() only when this file is the
