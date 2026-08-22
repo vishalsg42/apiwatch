@@ -39,4 +39,37 @@ describe('apiwatch audit', () => {
     expect(r.model.callSiteCount).toBe(1)
     expect(r.model.countsByRule['no-timeout']).toBeUndefined() // instance timeout suppresses it
   })
+  // Regression: request.get(url, options, cb) and got.get(url, options) both read no options
+  // at all before the configArgIndex fix, so both fired a false no-timeout despite being
+  // correctly protected.
+  it('does not fire no-timeout on a method-style request(url, options, cb) call', async () => {
+    const r = await runAudit({ root: tmpCopyOf('request-method-timeout') })
+    expect(r.model.countsByRule['no-timeout']).toBeUndefined()
+  })
+  it('does not fire no-timeout on a method-style got.get(url, options) call', async () => {
+    const r = await runAudit({ root: tmpCopyOf('got-method-timeout') })
+    expect(r.model.countsByRule['no-timeout']).toBeUndefined()
+  })
+  // Regression: a "retry" comment inside axios.create({...}) used to suppress no-retry for
+  // every call on that instance.
+  it('still fires no-retry when the only mention of retry is a comment inside create()', async () => {
+    const r = await runAudit({ root: tmpCopyOf('axios-create-comment-retry') })
+    expect(r.model.countsByRule['no-retry']).toBe(1)
+  })
+  // Regression: no-retry's idempotent-method skip read x.method, which was only populated for
+  // property-access calls. A bare axios({method:'post',...}) call's method was unreadable
+  // (undefined), and undefined was (wrongly, in this context) treated as idempotent, firing a
+  // false no-retry despite the call being a non-idempotent POST.
+  it('does not fire no-retry on a bare axios(config) call with method: post', async () => {
+    const r = await runAudit({ root: tmpCopyOf('bare-call-post-method') })
+    expect(r.model.countsByRule['no-retry']).toBeUndefined()
+  })
+  it('does not fire no-retry on a bare fetch(url, { method: "POST" }) call', async () => {
+    const r = await runAudit({ root: tmpCopyOf('bare-fetch-post-method') })
+    expect(r.model.countsByRule['no-retry']).toBeUndefined()
+  })
+  it('fires deprecated-client for request-promise', async () => {
+    const r = await runAudit({ root: tmpCopyOf('request-promise-deprecated') })
+    expect(r.model.countsByRule['deprecated-client']).toBe(1)
+  })
 })

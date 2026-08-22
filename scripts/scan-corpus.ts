@@ -27,15 +27,18 @@ export async function scanCorpus(repoDirs: string[]): Promise<CorpusStats> {
       const st = statSync(dir)
       if (!st.isDirectory()) throw new Error(`${dir} is not a directory`)
 
-      const { model } = await runAudit({ root: dir, json: true })
+      const { model, sites } = await runAudit({ root: dir, json: true })
       const noTimeout = model.countsByRule['no-timeout'] ?? 0
-      const noRetry = model.countsByRule['no-retry'] ?? 0
-      const unvalidated = model.countsByRule['unvalidated-response'] ?? 0
 
       stats.callSites += model.callSiteCount
       stats.withTimeout += model.callSiteCount - noTimeout
-      stats.withRetry += model.callSiteCount - noRetry
-      stats.withValidation += model.callSiteCount - unvalidated
+      // no-retry and unvalidated-response both deliberately abstain (retry: 'none' is only one
+      // of the possible verdicts, and validated can be 'unknown' as well as true/false), so
+      // "no finding" is not the same as "protected" for either rule. Inferring withRetry/
+      // withValidation from absence of a finding double-counted every abstention as protected.
+      // Count straight from the sites' own verdicts instead.
+      stats.withRetry += sites.filter((s) => s.options.retry !== 'none').length
+      stats.withValidation += sites.filter((s) => s.options.validated === true).length
       for (const [rule, count] of Object.entries(model.countsByRule))
         stats.byRule[rule] = (stats.byRule[rule] ?? 0) + count
     } catch {

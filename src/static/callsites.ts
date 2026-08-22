@@ -13,17 +13,22 @@ import {
   type MethodDeclaration,
   type Node,
   type ObjectBindingPattern,
+  type ObjectLiteralExpression,
   type ParameterDeclaration,
+  type PropertyAssignment,
   type SetAccessorDeclaration,
   type SourceFile,
   SyntaxKind,
 } from 'ts-morph'
 import type { CallSite, ClientBinding, Workspace } from '../model.js'
 import { collectFileImports } from './imports.js'
-import { resolveOptions } from './options.js'
+import { configMethod, resolveOptions } from './options.js'
 import { classifyUrl } from './urls.js'
 import { isResponseValidated } from './validation.js'
 
+// Deliberately does NOT include 'options': a property-access `.options()` call is never tracked
+// as a call site at all (see the README's Limitations and the no-retry rule row for why the
+// IDEMPOTENT set's 'options' entry below is dead by design, not an oversight).
 const METHODS = new Set(['get', 'post', 'put', 'patch', 'delete', 'del', 'head', 'request'])
 
 // A synthetic binding for a bare `fetch(...)` call that resolves to no import — the global.
@@ -151,6 +156,11 @@ export function findCallSites(
       b = binding ? clients.get(binding) : undefined
     }
     if (!b) continue
+    // A property-access call's method comes from its own name (`.post()`). A bare call
+    // (`axios({ method: 'post', ... })`, `fetch(url, { method: 'POST' })`) carries it in the
+    // config object instead — read it from there so a rule that skips idempotent methods
+    // doesn't have to treat "method unreadable" and "method is get/head" as the same thing.
+    method ??= configMethod(call, b)
 
     const { line, column } = sf.getLineAndColumnAtPos(call.getStart())
     const urlArg = pickUrlArg(call)
@@ -172,12 +182,31 @@ export function findCallSites(
   return out
 }
 
+/**
+ * `request`'s options object may key the endpoint under `url:` or `uri:` — both are
+ * documented, canonical usage, not an edge case.
+ */
+const URL_PROP_NAMES = ['url', 'uri']
+
+/**
+ * The call's URL argument. For an options-object-first call (`request({ url, ... }, cb)`),
+ * reads the object's OWN top-level `url`/`uri` property via the AST and returns its real
+ * initializer node — never a source-text regex, and never a fabricated node. A regex over the
+ * whole object's text matches the FIRST `url:` anywhere, including one nested inside another
+ * property (e.g. `proxy: { url: '...' }`), which can misreport a nested field as the endpoint.
+ */
 function pickUrlArg(call: CallExpression): Node | undefined {
   const args = call.getArguments()
   const obj = args.find((a) => a.getKind() === SyntaxKind.ObjectLiteralExpression)
   if (obj && args.indexOf(obj) === 0) {
-    const m = /\burl\s*:\s*([^,}]+)/.exec(obj.getText())
-    if (m) return { getKind: () => SyntaxKind.StringLiteral, getText: () => m[1].trim() } as never
+    const objLit = obj as ObjectLiteralExpression
+    for (const name of URL_PROP_NAMES) {
+      const p = objLit.getProperty(name)
+      if (p?.getKind() === SyntaxKind.PropertyAssignment) {
+        const init = (p as PropertyAssignment).getInitializer()
+        if (init) return init
+      }
+    }
   }
   return args.find((a) => a.getKind() !== SyntaxKind.ObjectLiteralExpression)
 }

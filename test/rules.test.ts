@@ -38,6 +38,10 @@ describe('rules', () => {
     const b = site({ client: 'request', id: 'b', line: 20, fileImports: ['request'] })
     expect(only('deprecated-client', [a, b])).toHaveLength(1)
   })
+  it('deprecated-client fires for request-promise too, not just request', () => {
+    const s = site({ client: 'request-promise', fileImports: ['request-promise'] })
+    expect(only('deprecated-client', [s])).toHaveLength(1)
+  })
   it('deprecated-client fires for node-fetch v2 but not v3', () => {
     const s = [site({ client: 'node-fetch', fileImports: ['node-fetch'] })]
     expect(

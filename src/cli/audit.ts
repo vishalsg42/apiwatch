@@ -23,7 +23,7 @@ export type AuditOptions = {
 
 export async function runAudit(
   opts: AuditOptions,
-): Promise<{ code: number; output: string; model: ReportModel }> {
+): Promise<{ code: number; output: string; model: ReportModel; sites: CallSite[] }> {
   const ws = await discoverWorkspace(opts.root)
   const projects = createProjects(ws)
   const registry = buildRegistry(projects)
@@ -46,11 +46,19 @@ export async function runAudit(
     filesAnalysed: ws.sourceFiles.length,
     filesSkipped,
   })
-  const output = opts.json ? renderJson(model) : renderTty(model)
+  let output = opts.json ? renderJson(model) : renderTty(model)
 
   if (!opts.json) {
-    mkdirSync(join(opts.root, '.apiwatch'), { recursive: true })
-    writeFileSync(join(opts.root, '.apiwatch/audit.md'), renderMarkdown(model))
+    // Writing .apiwatch/audit.md is a best-effort side note, not the audit's purpose — a
+    // read-only root (CI checkout, container, read-only mount) must not turn a successful
+    // audit into an unhandled EACCES rejection. Degrade to a warning line instead.
+    try {
+      mkdirSync(join(opts.root, '.apiwatch'), { recursive: true })
+      writeFileSync(join(opts.root, '.apiwatch/audit.md'), renderMarkdown(model))
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err)
+      output += `\nwarning: could not write .apiwatch/audit.md (${reason})\n`
+    }
   }
   const breach =
     opts.failOn === 'error'
@@ -58,5 +66,5 @@ export async function runAudit(
       : opts.failOn === 'warn'
         ? findings.length > 0
         : false
-  return { code: breach ? 1 : 0, output, model }
+  return { code: breach ? 1 : 0, output, model, sites }
 }

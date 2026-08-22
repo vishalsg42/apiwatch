@@ -12,6 +12,13 @@ const F = (
   evidence: string,
 ): Finding => ({ rule, severity, callSiteId: s.id, file: s.file, line: s.line, message, evidence })
 
+// `undefined` covers a call whose method truly can't be read at all (e.g. a bare `fetch(url)`
+// with no config object) — those default to HTTP GET, which is idempotent, so treating unknown
+// as idempotent-eligible here is intentional, not a fallback of convenience. It must NOT be
+// used to paper over a method apiwatch simply forgot to read: `CallSite.method` is now also
+// populated from a bare call's config object (`axios({ method: 'post', ... })`), so a call that
+// explicitly specifies a non-idempotent method is no longer indistinguishable from one with no
+// method at all.
 const IDEMPOTENT = new Set(['get', 'head', 'options', 'put', 'delete', undefined])
 
 export const noTimeout: Rule = {
@@ -36,7 +43,10 @@ export const noRetry: Rule = {
   severity: 'warn',
   check: (s) =>
     s
-      .filter((x) => x.options.retry === 'none' && x.client !== 'got' && IDEMPOTENT.has(x.method))
+      // No separate `x.client !== 'got'` check: resolveOptions already forces retry:'library'
+      // for every got call site, so options.retry === 'none' can never be true for got — the
+      // extra client check was unreachable dead code, not a second line of defense.
+      .filter((x) => x.options.retry === 'none' && IDEMPOTENT.has(x.method))
       .map((x) =>
         F(
           'no-retry',
@@ -75,7 +85,11 @@ export const deprecatedClient: Rule = {
     const seen = new Set<string>()
     const out: Finding[] = []
     for (const x of s) {
-      const bad = x.client === 'request' || (x.client === 'node-fetch' && nfMajor === 2)
+      // request-promise is a thin promise wrapper AROUND `request` — deprecated alongside its
+      // dependency, not just similar to it. The README's own example output shows a
+      // request-promise call site, so this rule missing it entirely was a real, visible gap.
+      const isRequestFamily = x.client === 'request' || x.client === 'request-promise'
+      const bad = isRequestFamily || (x.client === 'node-fetch' && nfMajor === 2)
       if (!bad || seen.has(x.file)) continue
       seen.add(x.file)
       out.push(
@@ -83,8 +97,8 @@ export const deprecatedClient: Rule = {
           'deprecated-client',
           'warn',
           x,
-          x.client === 'request'
-            ? '`request` is unmaintained since 2020'
+          isRequestFamily
+            ? `\`${x.client}\` is unmaintained since 2020`
             : '`node-fetch@2` is superseded by native fetch',
           `file imports ${x.client}`,
         ),

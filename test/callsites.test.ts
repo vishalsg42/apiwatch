@@ -7,7 +7,13 @@ import { projectsFor, sitesFor } from './helpers.js'
 describe('findCallSites', () => {
   it('finds every axios call shape', async () => {
     const s = await sitesFor('axios-variants', 'svc.ts')
-    expect(s.map((x) => x.method)).toEqual(['get', 'post', 'put', undefined])
+    // The 4th call is a bare `axios({ method: 'get', url: ... })` — method now comes from the
+    // config object read in `configMethod`, not just a property-access call's own name, so it
+    // reads 'get' instead of the previously-pinned `undefined`. See the no-retry idempotency
+    // regression tests in test/rules.test.ts for why this matters: before this fix, an
+    // unreadable method defaulted to "treat as idempotent", so a bare call with an actual
+    // non-idempotent method (e.g. `method: 'post'`) was wrongly included in no-retry.
+    expect(s.map((x) => x.method)).toEqual(['get', 'post', 'put', 'get'])
   })
   it('emits repo-relative posix paths', async () =>
     expect((await sitesFor('axios-variants', 'svc.ts'))[0].file).toBe('src/svc.ts'))
@@ -54,6 +60,32 @@ describe('findCallSites', () => {
 
   it('recognises a function declared named fetch as shadowing the whole file', async () =>
     expect(await sitesFor('fetch-named-fn', 'svc.ts')).toHaveLength(0))
+
+  // Regression: pickUrlArg used to regex over the whole options object's text and match the
+  // FIRST `url:` anywhere, including one nested inside another property (e.g. a proxy config),
+  // fabricating a fake node in the process. It must read the OWN top-level url/uri property via
+  // the AST and hand classifyUrl the real initializer node.
+  it('does not mistake a nested proxy url for the call url', async () => {
+    const s = await sitesFor('request-nested-url-proxy', 'proxy.js')
+    expect(s).toHaveLength(1)
+    expect(s[0].url).toMatchObject({ kind: 'variable', expr: 'target' })
+  })
+  it('reads the url from the canonical `uri:` key too', async () => {
+    const s = await sitesFor('request-uri-key', 'proxy.js')
+    expect(s).toHaveLength(1)
+    expect(s[0].url).toMatchObject({ kind: 'literal', host: 'x.dev' })
+  })
+
+  // Regression: resolveClients only walked ESM getImportDeclarations(), so a client exported
+  // via `module.exports.api = axios.create(...)` and consumed via `const { api } = require(...)`
+  // — an ordinary CJS pattern — produced zero call sites.
+  it('finds calls on a CJS cross-module client exported via module.exports', async () =>
+    expect(await sitesFor('cjs-shared-client', 'payments.js')).toHaveLength(1))
+
+  // Regression: detectClients only walked top-level getVariableDeclarations(), so a lazy
+  // `const axios = require('axios')` inside a function body was invisible.
+  it('finds a call on a client required lazily inside a function body', async () =>
+    expect(await sitesFor('cjs-lazy-require', 'svc.js')).toHaveLength(1))
 
   it('keeps CallSite.file repo-relative even when ws.root carries a trailing slash', async () => {
     const { w, projects } = await projectsFor('axios-variants')

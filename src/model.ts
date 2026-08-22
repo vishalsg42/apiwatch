@@ -17,7 +17,11 @@ export type UrlExpr =
 
 export type CallOptions = {
   timeoutMs: number | 'instance-default' | null
-  retry: 'none' | 'library' | 'manual'
+  // No 'manual': a `for`/`while` ancestor was once mapped to 'manual', but that heuristic
+  // misclassified pagination loops as retry and silently suppressed 22 of 93 real findings in
+  // one measured repo — it was deliberately killed (see options.ts for the full account).
+  // Leaving 'manual' in this public type would just invite a contributor to re-implement it.
+  retry: 'none' | 'library'
   validated: boolean | 'unknown'
 }
 
@@ -57,7 +61,7 @@ export type Workspace = {
   root: string // absolute, posix
   sourceFiles: string[] // absolute, posix
   packageDirs: string[] // absolute, posix
-  dependencies: Record<string, string> // merged deps+devDeps, nearest package.json wins
+  dependencies: Record<string, string> // merged deps+devDeps across all package.json files; on key collision the last file walked wins (non-deterministic in a monorepo)
 }
 
 export type ReportModel = {

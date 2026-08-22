@@ -1,0 +1,7 @@
+{
+  "name": "bare-call-post-method",
+  "version": "1.0.0",
+  "dependencies": {
+    "axios": "^1.7.0"
+  }
+}

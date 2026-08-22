@@ -1,8 +1,5 @@
 import { type CallExpression, type Node, SyntaxKind } from 'ts-morph'
 import type { CallOptions, ClientBinding } from '../model.js'
-import { collectFileImports } from './imports.js'
-
-const RETRY_LIBS = ['axios-retry', 'p-retry', 'async-retry', 'retry-axios']
 
 /**
  * Looks up an object literal's OWN top-level property by name, accepting both a regular
@@ -85,6 +82,24 @@ function configObj(call: CallExpression, binding: ClientBinding): Node | undefin
   return arg && arg.getKind() === SyntaxKind.ObjectLiteralExpression ? arg : undefined
 }
 
+/**
+ * The call's HTTP method, read from a `method:` string literal in its resolved config object,
+ * for the call shapes that carry the method THERE rather than as a property-access name —
+ * `axios({ method: 'post', ... })`, `fetch(url, { method: 'POST' })`. Normalized to lowercase.
+ * `callsites.ts` only ever populated `method` from a property-access call's own name, so a bare
+ * call's config-object method was invisible to any rule that reads `CallSite.method` — the
+ * idempotent-method skip in `no-retry` in particular treated an unreadable method as idempotent
+ * by default, which incorrectly fired on a bare `axios({ method: 'post', ... })` call.
+ */
+export function configMethod(call: CallExpression, binding: ClientBinding): string | undefined {
+  const config = configObj(call, binding)
+  if (!config) return undefined
+  const m = prop(config, 'method')
+  if (!m || m.shorthand || m.initializer.getKind() !== SyntaxKind.StringLiteral) return undefined
+  const raw = m.initializer.getText().slice(1, -1).toLowerCase()
+  return raw === 'del' ? 'delete' : raw
+}
+
 export function resolveOptions(
   call: CallExpression,
   binding: ClientBinding,
@@ -119,19 +134,26 @@ export function resolveOptions(
 
   let retry: CallOptions['retry'] =
     binding.kind === 'got' || binding.instanceRetry ? 'library' : 'none'
-  if (retry === 'none') {
-    const imports = collectFileImports(call.getSourceFile())
-    if (imports.some((i) => RETRY_LIBS.includes(i))) retry = 'library'
-    else if (config && (prop(config, 'retry') || prop(config, 'retries'))) retry = 'library'
-    // A `for`/`while` ancestor was previously treated as a hand-rolled retry loop and mapped
-    // to 'manual'. Measured against a real repo, this was wrong: a `while (hasMore) { try {
-    // ... } catch {} }` pagination loop is structurally identical to a retry loop, and 23.7%
-    // of that repo's call sites were pagination, not retry — every one of them silently
-    // suppressed a genuine no-retry finding. There is no cheap static discriminator between
-    // the two shapes, and "silence beats a wrong finding" cuts the other way here: a false
-    // suppression is invisible, while an occasional false 'no-retry' warn on a real hand-rolled
-    // retry loop is mild and visible. So this heuristic is gone; retry is only 'none' or
-    // 'library' now.
-  }
+  if (retry === 'none' && config && (prop(config, 'retry') || prop(config, 'retries')))
+    retry = 'library'
+  // A `for`/`while` ancestor was previously treated as a hand-rolled retry loop and mapped
+  // to 'manual'. Measured against a real repo, this was wrong: a `while (hasMore) { try {
+  // ... } catch {} }` pagination loop is structurally identical to a retry loop, and 23.7%
+  // of that repo's call sites were pagination, not retry — every one of them silently
+  // suppressed a genuine no-retry finding. There is no cheap static discriminator between
+  // the two shapes, and "silence beats a wrong finding" cuts the other way here: a false
+  // suppression is invisible, while an occasional false 'no-retry' warn on a real hand-rolled
+  // retry loop is mild and visible. So this heuristic is gone; retry is only 'none' or
+  // 'library' now.
+  //
+  // The same reasoning killed a second heuristic: "the file imports a retry library ANYWHERE"
+  // used to force EVERY call in that file to 'library', even a bare call nowhere near the
+  // wrapper (`import pRetry from 'p-retry'` with one call actually wrapped in `pRetry(...)` and
+  // one call that plainly isn't — neither got flagged). That's a file-wide false suppression,
+  // the same shape as the pagination bug above. There is no cheap way to prove a specific call
+  // is "actually enclosed by" an arbitrary higher-order retry wrapper without knowing that
+  // wrapper's calling convention, so this only trusts what it can see at the call site itself
+  // (the `retry`/`retries` option) or on the resolved client binding (`instanceRetry`,
+  // `got`'s built-in retry).
   return { timeoutMs, retry }
 }

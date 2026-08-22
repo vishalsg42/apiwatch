@@ -1,9 +1,12 @@
 import { type CallExpression, type PropertyAccessExpression, SyntaxKind } from 'ts-morph'
-import { collectFileImports } from './imports.js'
+import { collectFileImports, collectImportedNames } from './imports.js'
 
 const VALIDATOR_LIBS = ['zod', 'joi', '@hapi/joi', 'yup', 'ajv', 'class-validator']
 const MEMBER_NAMES = new Set(['parse', 'safeParse', 'validate', 'validateSync', 'cast', 'assert'])
 const FREE_NAMES = new Set(['validate', 'validateSync', 'validateOrReject', 'assert'])
+// `JSON.parse`/`Date.parse` share the member name `parse` with zod's `.parse()` but are never
+// schema validation — a receiver check, not a name check, is what actually excludes them.
+const EXCLUDED_RECEIVERS = new Set(['JSON', 'Date'])
 
 /**
  * Whether the response of an HTTP call is validated before use. Only a PROVABLE `false` may
@@ -46,10 +49,10 @@ export function isResponseValidated(call: CallExpression): boolean | 'unknown' {
 
   const hasMemberValidatorCall = calls.some((c) => {
     const e = c.getExpression()
-    return (
-      e.getKind() === SyntaxKind.PropertyAccessExpression &&
-      MEMBER_NAMES.has((e as PropertyAccessExpression).getName())
-    )
+    if (e.getKind() !== SyntaxKind.PropertyAccessExpression) return false
+    const pae = e as PropertyAccessExpression
+    if (EXCLUDED_RECEIVERS.has(pae.getExpression().getText())) return false
+    return MEMBER_NAMES.has(pae.getName())
   })
   if (hasValidatorLib && hasMemberValidatorCall) return true
 
@@ -59,9 +62,13 @@ export function isResponseValidated(call: CallExpression): boolean | 'unknown' {
   })
   if (hasValidatorLib && hasFreeValidatorCall) return true
 
-  const importedNames = new Set(
-    sf.getImportDeclarations().flatMap((d) => d.getNamedImports().map((n) => n.getName())),
-  )
+  // Must see CJS `const { handle } = require('./other')` bindings too, not just ESM named
+  // imports — using getImportDeclarations() alone here (while the hasValidatorLib check above
+  // correctly used collectFileImports) meant this escape check was silently blind for CJS: a
+  // CJS file handing its response to an imported function returned a false `false` (proven
+  // unvalidated) instead of 'unknown', firing unvalidated-response on a call this analysis
+  // simply can't see far enough to judge.
+  const importedNames = collectImportedNames(sf)
   const escapes = calls.some((c) => {
     const e = c.getExpression()
     return e.getKind() === SyntaxKind.Identifier && importedNames.has(e.getText())

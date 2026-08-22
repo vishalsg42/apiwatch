@@ -50,4 +50,12 @@ describe('client bindings', () => {
     expect(b?.kind).toBe('axios')
     expect(b?.instanceTimeout).toBe(true)
   })
+  // Regression: instanceRetry used to scan the ENTIRE create() call's source text, comments
+  // included, so a `// TODO: add retry handling here` comment sitting inside the call
+  // suppressed no-retry for every call on that instance. It must only see own top-level
+  // properties, the same way instanceTimeout already does.
+  it('does NOT treat a "retry" comment inside create() as an instance retry', async () => {
+    const b = (await clientsFor('axios-create-comment-retry', 'svc.ts')).get('api')
+    expect(b?.instanceRetry).toBe(false)
+  })
 })
