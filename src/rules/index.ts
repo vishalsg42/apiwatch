@@ -26,6 +26,12 @@ export const noTimeout: Rule = {
   severity: 'error',
   check: (s) =>
     s
+      // Fires ONLY on a proven-absent timeout (timeoutMs === null), never on 'unknown'. A
+      // config argument that exists but isn't statically readable (an Identifier, a spread, a
+      // call expression, ...) used to be conflated with "no config at all" and reported here;
+      // reproduced on twilio-node's `axios(config)` (src/base/RequestClient.ts:73), where
+      // `config` is an identifier that DOES set a timeout. Same contract as unvalidated-response
+      // staying silent on 'unknown'.
       .filter((x) => x.options.timeoutMs === null)
       .map((x) =>
         F(
@@ -46,6 +52,11 @@ export const noRetry: Rule = {
       // No separate `x.client !== 'got'` check: resolveOptions already forces retry:'library'
       // for every got call site, so options.retry === 'none' can never be true for got; the
       // extra client check was unreachable dead code, not a second line of defense.
+      //
+      // Fires ONLY on a proven-absent retry (retry === 'none'), never on 'unknown', for the
+      // same reason no-timeout stays silent on 'unknown' above: the twilio-node call site sits
+      // inside a jitter-backoff retry function, but its config argument is an unreadable
+      // identifier, so 'none' would be a false positive there too.
       .filter((x) => x.options.retry === 'none' && IDEMPOTENT.has(x.method))
       .map((x) =>
         F(

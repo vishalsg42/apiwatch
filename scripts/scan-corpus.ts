@@ -18,6 +18,7 @@ export async function scanCorpus(repoDirs: string[]): Promise<CorpusStats> {
     withTimeout: 0,
     withRetry: 0,
     withValidation: 0,
+    unreadable: 0,
     byRule: {},
   }
 
@@ -28,17 +29,23 @@ export async function scanCorpus(repoDirs: string[]): Promise<CorpusStats> {
       if (!st.isDirectory()) throw new Error(`${dir} is not a directory`)
 
       const { model, sites } = await runAudit({ root: dir, json: true })
-      const noTimeout = model.countsByRule['no-timeout'] ?? 0
 
       stats.callSites += model.callSiteCount
-      stats.withTimeout += model.callSiteCount - noTimeout
-      // no-retry and unvalidated-response both deliberately abstain (retry: 'none' is only one
-      // of the possible verdicts, and validated can be 'unknown' as well as true/false), so
-      // "no finding" is not the same as "protected" for either rule. Inferring withRetry/
-      // withValidation from absence of a finding double-counted every abstention as protected.
-      // Count straight from the sites' own verdicts instead.
-      stats.withRetry += sites.filter((s) => s.options.retry !== 'none').length
+      // no-timeout, no-retry and unvalidated-response all deliberately abstain on 'unknown'
+      // (timeoutMs and retry are no longer just "protected or not": an unreadable config
+      // argument is neither), so "no finding" is not the same as "protected". Deriving
+      // withTimeout from callSiteCount - noTimeout used to silently count every 'unknown' site
+      // as protected, which is exactly the twilio-node false-positive bug turned inside out:
+      // the count claimed 159 protected call sites that were never actually read. Count
+      // straight from the sites' own verdicts instead, for all three fields.
+      stats.withTimeout += sites.filter(
+        (s) => s.options.timeoutMs !== null && s.options.timeoutMs !== 'unknown',
+      ).length
+      stats.withRetry += sites.filter((s) => s.options.retry === 'library').length
       stats.withValidation += sites.filter((s) => s.options.validated === true).length
+      stats.unreadable += sites.filter(
+        (s) => s.options.timeoutMs === 'unknown' || s.options.retry === 'unknown',
+      ).length
       for (const [rule, count] of Object.entries(model.countsByRule))
         stats.byRule[rule] = (stats.byRule[rule] ?? 0) + count
     } catch {

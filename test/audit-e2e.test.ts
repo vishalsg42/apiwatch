@@ -72,4 +72,14 @@ describe('apiwatch audit', () => {
     const r = await runAudit({ root: tmpCopyOf('request-promise-deprecated') })
     expect(r.model.countsByRule['deprecated-client']).toBe(1)
   })
+  // Regression: reproduced against twilio-node's src/base/RequestClient.ts:73, a bare
+  // `axios(config)` call inside a jitter-backoff retry function, where `config` is an
+  // identifier holding an options object built elsewhere that DOES set a timeout. The old code
+  // treated an unreadable config argument the same as a genuinely absent one and reported both
+  // no-timeout (error) and no-retry (warn) on correctly-protected code. Neither may fire now.
+  it('does not fire no-timeout or no-retry on a twilio-shaped axios(config) call inside a retry function', async () => {
+    const r = await runAudit({ root: tmpCopyOf('twilio-retry-shape') })
+    expect(r.model.countsByRule['no-timeout']).toBeUndefined()
+    expect(r.model.countsByRule['no-retry']).toBeUndefined()
+  })
 })

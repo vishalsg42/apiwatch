@@ -74,12 +74,34 @@ function configArgIndex(
   }
 }
 
+/**
+ * The call's config argument, distinguishing "genuinely absent" from "present but not
+ * statically readable". The two are NOT the same: `axios.get(url)` proves there is no
+ * timeout/retry at all, while `axios(config)` with `config` an Identifier proves nothing either
+ * way (the object built elsewhere might set one). Conflating them was the twilio-node bug:
+ * `src/base/RequestClient.ts:73` passes a bare `axios(config)` where `config` is an identifier
+ * that DOES set a timeout, and the old code returned "absent" for both cases, reporting a false
+ * no-timeout error on correctly-protected code.
+ */
+type ConfigArg =
+  | { kind: 'object'; node: Node } // an ObjectLiteralExpression at the expected index
+  | { kind: 'unreadable' } // something else at the expected index: Identifier, spread, call, ...
+  | { kind: 'absent' } // no argument at the expected index at all, or no expected index
+
+function configArg(call: CallExpression, binding: ClientBinding): ConfigArg {
+  const idx = configArgIndex(binding.kind, methodOf(call))
+  if (idx === undefined) return { kind: 'absent' }
+  const arg = call.getArguments()[idx]
+  if (!arg) return { kind: 'absent' }
+  return arg.getKind() === SyntaxKind.ObjectLiteralExpression
+    ? { kind: 'object', node: arg }
+    : { kind: 'unreadable' }
+}
+
 /** The call's single options/config object literal, or undefined if unreadable or absent. */
 function configObj(call: CallExpression, binding: ClientBinding): Node | undefined {
-  const idx = configArgIndex(binding.kind, methodOf(call))
-  if (idx === undefined) return undefined
-  const arg = call.getArguments()[idx]
-  return arg && arg.getKind() === SyntaxKind.ObjectLiteralExpression ? arg : undefined
+  const arg = configArg(call, binding)
+  return arg.kind === 'object' ? arg.node : undefined
 }
 
 /**
@@ -104,8 +126,13 @@ export function resolveOptions(
   call: CallExpression,
   binding: ClientBinding,
 ): Pick<CallOptions, 'timeoutMs' | 'retry'> {
-  let timeoutMs: CallOptions['timeoutMs'] = null
-  const config = configObj(call, binding)
+  const arg = configArg(call, binding)
+  const config = arg.kind === 'object' ? arg.node : undefined
+
+  // 'unknown' only when a config argument EXISTS but isn't statically readable. When there is
+  // genuinely no config argument (arg.kind === 'absent'), timeoutMs/retry start at their
+  // PROVEN-ABSENT values below, same as before this fix.
+  let timeoutMs: CallOptions['timeoutMs'] = arg.kind === 'unreadable' ? 'unknown' : null
   if (config) {
     const t = prop(config, 'timeout')
     if (t) {
@@ -130,10 +157,21 @@ export function resolveOptions(
       }
     }
   }
+  // binding.instanceTimeout still wins over a merely-absent timeout, unchanged from before this
+  // fix. It does NOT override 'unknown': an unreadable config argument stays 'unknown' rather
+  // than being upgraded to 'instance-default', which is fine either way since no-timeout only
+  // fires on `null` and 'unknown' never triggers it.
   if (timeoutMs === null && binding.instanceTimeout) timeoutMs = 'instance-default'
 
+  // Same absent-vs-unreadable split as timeoutMs above, except binding.kind === 'got' and
+  // binding.instanceRetry still win unconditionally, exactly as before this fix: a resolved
+  // client-level guarantee is trusted even when THIS call's own config can't be read.
   let retry: CallOptions['retry'] =
-    binding.kind === 'got' || binding.instanceRetry ? 'library' : 'none'
+    binding.kind === 'got' || binding.instanceRetry
+      ? 'library'
+      : arg.kind === 'unreadable'
+        ? 'unknown'
+        : 'none'
   if (retry === 'none' && config && (prop(config, 'retry') || prop(config, 'retries')))
     retry = 'library'
   // A `for`/`while` ancestor was previously treated as a hand-rolled retry loop and mapped

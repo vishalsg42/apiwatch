@@ -15,7 +15,25 @@ describe('rules', () => {
         site({ options: { timeoutMs: 'instance-default', retry: 'none', validated: 'unknown' } }),
       ]),
     ).toHaveLength(0))
+  // Regression: an unreadable config argument (Identifier, spread, call expression, ...) was
+  // conflated with "genuinely no config argument" and reported no-timeout, same shape as the
+  // twilio-node false positive on `axios(config)` at src/base/RequestClient.ts:73. no-timeout
+  // must stay silent on 'unknown', the same contract unvalidated-response already has.
+  it('no-timeout is silent for an unknown (unreadable) config argument', () =>
+    expect(
+      only('no-timeout', [
+        site({ options: { timeoutMs: 'unknown', retry: 'unknown', validated: 'unknown' } }),
+      ]),
+    ).toHaveLength(0))
   it('no-retry is a warning, not an error', () => expect(only('no-retry')[0].severity).toBe('warn'))
+  // Same contract as no-timeout above: 'unknown' means "not statically readable", not "no retry
+  // configured", so it must not be treated as retry === 'none'.
+  it('no-retry is silent for an unknown (unreadable) config argument', () =>
+    expect(
+      only('no-retry', [
+        site({ options: { timeoutMs: 'unknown', retry: 'unknown', validated: 'unknown' } }),
+      ]),
+    ).toHaveLength(0))
   it('no-retry is silent for got', () =>
     expect(
       only('no-retry', [

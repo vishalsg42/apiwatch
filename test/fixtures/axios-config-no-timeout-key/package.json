@@ -1,0 +1,7 @@
+{
+  "name": "axios-config-no-timeout-key",
+  "version": "1.0.0",
+  "dependencies": {
+    "axios": "^1.7.0"
+  }
+}

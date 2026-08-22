@@ -16,12 +16,22 @@ export type UrlExpr =
   | { kind: 'unknown' }
 
 export type CallOptions = {
-  timeoutMs: number | 'instance-default' | null
+  // `null` means a timeout is PROVEN ABSENT: a config argument was either genuinely missing or
+  // was present and readable but provably lacked a `timeout`/`signal` key. `'unknown'` means
+  // the opposite: a config argument exists at the expected index but wasn't statically
+  // readable (an Identifier, a spread, a call expression, a conditional, ...), so nothing can
+  // be said about it either way. Reproduced against twilio-node's `axios(config)` call
+  // (src/base/RequestClient.ts:73): `config` is an identifier built elsewhere in the file and
+  // DOES set a timeout, but the old code could only find an ObjectLiteralExpression, so it
+  // returned `null` and reported a false no-timeout error on correctly-protected code.
+  timeoutMs: number | 'instance-default' | 'unknown' | null
   // No 'manual': a `for`/`while` ancestor was once mapped to 'manual', but that heuristic
   // misclassified pagination loops as retry and silently suppressed 22 of 93 real findings in
   // one measured repo; it was deliberately killed (see options.ts for the full account).
   // Leaving 'manual' in this public type would just invite a contributor to re-implement it.
-  retry: 'none' | 'library'
+  // `'none'` means retry is PROVEN ABSENT, the same contract as `timeoutMs: null` above.
+  // `'unknown'` means the config argument wasn't statically readable, same twilio-node repro.
+  retry: 'none' | 'library' | 'unknown'
   validated: boolean | 'unknown'
 }
 
@@ -81,6 +91,11 @@ export type CorpusStats = {
   withTimeout: number
   withRetry: number
   withValidation: number
+  // Call sites where the timeout or retry config could not be statically read at all
+  // (options.timeoutMs === 'unknown' or options.retry === 'unknown'): neither protected nor
+  // unprotected, just unreadable. Reported separately so the corpus dataset can state honestly
+  // how many sites fall in this bucket instead of folding them into "protected" or "unprotected".
+  unreadable: number
   byRule: Record<string, number>
 }
 

@@ -84,6 +84,32 @@ describe('resolveOptions', () => {
     ))
   it('reads a timeout from a bare axios(config) call (config at index 0)', async () =>
     expect((await siteAt('axios-bare-timeout', 'svc.ts', /axios\(/)).options.timeoutMs).toBe(3000))
+  // Regression: reproduced against twilio-node's src/base/RequestClient.ts:73. `config` is an
+  // identifier holding an object built elsewhere in the file that DOES set a timeout, but
+  // resolveOptions only reads an ObjectLiteralExpression at the expected argument index; it
+  // never traces an identifier back to its declaration (no type-checker APIs, by design). The
+  // old code treated "unreadable" the same as "absent" and reported a false no-timeout error;
+  // it must now report 'unknown' and stay silent instead.
+  it('is unknown, not null, when a bare call config is an identifier', async () => {
+    const s = await siteAt('config-identifier', 'svc.ts', /axios\(config\)/)
+    expect(s.options.timeoutMs).toBe('unknown')
+    expect(s.options.retry).toBe('unknown')
+  })
+  it('is unknown, not null, when a method-style config is an identifier', async () => {
+    const s = await siteAt('opts-identifier', 'svc.ts', /axios\.get/)
+    expect(s.options.timeoutMs).toBe('unknown')
+    expect(s.options.retry).toBe('unknown')
+  })
+  it('is null (proven absent), not unknown, when there is no config argument at all', async () => {
+    const s = await siteAt('axios-no-config-arg', 'svc.ts', /axios\.get/)
+    expect(s.options.timeoutMs).toBeNull()
+    expect(s.options.retry).toBe('none')
+  })
+  it('is null (proven absent), not unknown, when config is readable but lacks the key', async () => {
+    const s = await siteAt('axios-config-no-timeout-key', 'svc.ts', /axios\.get/)
+    expect(s.options.timeoutMs).toBeNull()
+    expect(s.options.retry).toBe('none')
+  })
   // Regression: configArgIndex only ever read options for the BARE-call form of request,
   // request-promise, got and node-fetch. Method-style usage (`request.get(url, options, cb)`),
   // ordinary usage of the client the README leads with, read no options at all, producing a
