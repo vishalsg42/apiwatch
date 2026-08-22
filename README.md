@@ -32,22 +32,61 @@ Nothing here is wrong syntactically. It ships, it works in staging, and it takes
 
 ## After
 
-Real output from `apiwatch audit` against a production Node backend, paths anonymised:
+Real output against [Outline](https://github.com/outline/outline) (v1.9.1, commit `d77dcdf`), a
+self-hosted knowledge base. Nothing here is anonymised, so you can check every line yourself:
 
 ```
-  analysed 46 of 46 files · 10 outbound call sites
-
-  ✖ no-timeout               10
-  ⚠ no-retry                 10
-  ⚠ unvalidated-response     10
-  ⚠ deprecated-client         5
-
-  src/proxy/vendor.js:77       request call has no timeout and can hang indefinitely
-  src/services/notify.js:32    request-promise call has no timeout and can hang indefinitely
-  src/proxy/client.js:108      `request` is unmaintained since 2020
+git clone --depth 1 https://github.com/outline/outline
+npx apiwatch audit --root outline
 ```
 
-Across five production services, the tool measured **148 outbound call sites: 13 with a timeout (8.8%), 0 with retry (0.0%), 0 validating the response.** That is not a cherry-picked repo; it is the default state of hand-rolled HTTP calls in real backends.
+```
+  analysed 2144 of 2144 files · 32 outbound call sites
+  skipped 15 files in example/benchmark/doc dirs (--include-non-shipping to audit them)
+
+  ✖ no-timeout               24
+  ⚠ no-retry                 16
+  ⚠ unvalidated-response      6
+  ⚠ hardcoded-host            1
+  ⚠ deprecated-client         1
+
+  app/components/Lightbox.tsx:663  fetch call has no timeout and can hang indefinitely
+  plugins/figma/server/figma.ts:66  fetch call has no timeout and can hang indefinitely
+  plugins/figma/server/figma.ts:91  fetch call has no timeout and can hang indefinitely
+  plugins/figma/server/figma.ts:107  fetch call has no timeout and can hang indefinitely
+  plugins/figma/server/figma.ts:155  fetch call has no timeout and can hang indefinitely
+  plugins/gitlab/server/gitlab.ts:336  fetch call has no timeout and can hang indefinitely
+```
+
+Most of the findings land where the risk is: `plugins/figma`, `plugins/linear`,
+`plugins/gitlab` and `plugins/slack` are all third-party boundaries, where a slow vendor
+becomes your outage. `figma.ts:66` is an OAuth token exchange with no timeout and no signal:
+
+```ts
+const res = await fetch(FigmaUtils.tokenUrl, {
+  method: "POST",
+  headers,
+  body,
+});
+```
+
+Node's `fetch` has no default timeout, so if Figma stalls, that call waits forever.
+
+What the report does **not** say matters as much as what it does. In that same file:
+
+- **`no-retry` fired on lines 107 and 155 only**, the two idempotent `GET`s. It skipped the
+  `POST` token exchange and refresh on 66 and 91, because retrying a one-time OAuth code is a
+  correctness bug, not a fix.
+- **`unvalidated-response` fired on none of the four**, because line 78 runs
+  `AccessTokenResponseSchema.parse(await res.json())`. apiwatch found the zod call and stayed
+  quiet.
+
+Twenty-four `no-timeout` findings across fourteen files is a morning's work, not a wall of
+noise.
+
+Across a separate corpus of five production services, the tool measured **148 outbound call
+sites: 13 with a timeout (8.8%), 0 with retry (0.0%), 0 validating the response.** Outline is
+not a cherry-picked repo; this is the default state of hand-rolled HTTP calls in real backends.
 
 ## Development
 
