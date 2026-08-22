@@ -1,5 +1,11 @@
 {
   "name": "apiwatch", "version": "0.1.0", "type": "module",
+  "description": "Zero-config static audit of outbound third-party HTTP calls in a Node/TypeScript repo — no timeout, no retry, no response validation, one AST pass, no code runs.",
+  "license": "MIT",
+  "author": "Vishal Gupta",
+  "homepage": "https://github.com/vishalsg42/apiwatch#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/vishalsg42/apiwatch.git" },
+  "keywords": ["http", "audit", "static-analysis", "timeout", "retry", "typescript", "cli"],
   "engines": { "node": ">=22" },
   "packageManager": "pnpm@11.8.0",
   "bin": { "apiwatch": "./dist/cli.js" },
