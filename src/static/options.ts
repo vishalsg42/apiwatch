@@ -11,6 +11,78 @@ import type { CallOptions, ClientBinding } from '../model.js'
  * "absent", while callers that only care about presence (retry/retries) can treat either kind
  * the same way.
  */
+/**
+ * Does this config object literal contain a spread (`{ ...defaults }`)?
+ *
+ * `prop` reads OWN top-level properties only, so it cannot see through a spread. Treating such
+ * an object as fully readable let apiwatch PROVE a timeout absent when the spread may well
+ * supply one, which is an error-severity false positive on ordinary code. Verified against the
+ * built 0.3.4: `axios.get(url, { ...cfg })` fired no-timeout while `axios.get(url, cfg)`
+ * correctly abstained, and that asymmetry is what marks it as an oversight rather than a policy.
+ *
+ * The rule this enables: a spread makes ABSENCE and DISABLEMENT unprovable. An explicitly
+ * present property is still read, in any position, because reading it only ever leads to
+ * silence or a concrete value, never to a finding.
+ */
+/**
+ * The object literals a spread's operand can contribute, or undefined when that is not
+ * statically knowable.
+ *
+ * `...(body && { data })` can only ever add `data`, so it hides nothing and absence of a
+ * `timeout` remains provable. Treating every spread as opaque cost a genuine error-severity
+ * finding on real code (`axios({ method, url, headers, ...(body && { data }), responseType })`,
+ * which really does set no timeout), so narrow the rule to spreads whose keys cannot be seen.
+ */
+const spreadOperandLiterals = (n: Node): Node[] | undefined => {
+  const k = n.getKind()
+  if (k === SyntaxKind.ObjectLiteralExpression) return [n]
+  if (k === SyntaxKind.ParenthesizedExpression) {
+    const inner = n.asKind(SyntaxKind.ParenthesizedExpression)?.getExpression()
+    return inner ? spreadOperandLiterals(inner) : undefined
+  }
+  if (k === SyntaxKind.ConditionalExpression) {
+    const c = n.asKindOrThrow(SyntaxKind.ConditionalExpression)
+    const a = spreadOperandLiterals(c.getWhenTrue())
+    const b = spreadOperandLiterals(c.getWhenFalse())
+    return a && b ? [...a, ...b] : undefined
+  }
+  if (k === SyntaxKind.BinaryExpression) {
+    const b = n.asKindOrThrow(SyntaxKind.BinaryExpression)
+    const op = b.getOperatorToken().getKind()
+    // `cond && { … }` contributes the right side or nothing; spreading a falsy value adds no
+    // keys. `a || { … }` can contribute either side, so both must be readable.
+    if (op === SyntaxKind.AmpersandAmpersandToken) return spreadOperandLiterals(b.getRight())
+    if (op === SyntaxKind.BarBarToken || op === SyntaxKind.QuestionQuestionToken) {
+      const l = spreadOperandLiterals(b.getLeft())
+      const r = spreadOperandLiterals(b.getRight())
+      return l && r ? [...l, ...r] : undefined
+    }
+  }
+  return undefined
+}
+
+/**
+ * Splits a config object into "the extra literals its spreads can contribute" and "is any spread
+ * opaque". An opaque spread makes ABSENCE and DISABLEMENT unprovable, because `prop` reads own
+ * top-level properties only and cannot see what `{ ...defaults }` carries.
+ *
+ * Verified against the built 0.3.4: `axios.get(url, { ...cfg })` fired no-timeout at error
+ * severity while `axios.get(url, cfg)` correctly abstained. That asymmetry marks it as an
+ * oversight rather than a policy.
+ */
+const analyseSpreads = (n: Node): { opaque: boolean; extra: Node[] } => {
+  const props = n.asKind(SyntaxKind.ObjectLiteralExpression)?.getProperties() ?? []
+  const extra: Node[] = []
+  for (const x of props) {
+    if (x.getKind() !== SyntaxKind.SpreadAssignment) continue
+    const operand = x.asKind(SyntaxKind.SpreadAssignment)?.getExpression()
+    const lits = operand ? spreadOperandLiterals(operand) : undefined
+    if (!lits) return { opaque: true, extra: [] }
+    extra.push(...lits)
+  }
+  return { opaque: false, extra }
+}
+
 type PropLookup = { shorthand: true } | { shorthand: false; initializer: Node }
 const prop = (n: Node, name: string): PropLookup | undefined => {
   const p = n.asKind(SyntaxKind.ObjectLiteralExpression)?.getProperty(name)
@@ -59,23 +131,63 @@ function configArgIndex(
       return 1 // fetch(url, init): same shape for a bare call or a method-style call
     case 'got':
       return 1 // got(url, options) / got.get(url, options): options is always arg 1
-    case 'request':
-    case 'request-promise':
-      // request(options, cb) puts the options object FIRST: there is no url argument in the
-      // bare-call form. request.get(url, options, cb) is ordinary method-style usage of the
-      // same client and puts options SECOND, after the url. Reading only the bare-call shape
-      // meant every method-style call (`request.get(url, { timeout }, cb)`) read no options at
-      // all and reported a false no-timeout on a correctly-protected call.
-      return method === undefined ? 0 : 1
-    case 'node:http':
-      // Both http.request(options, cb) and http.get(options, cb) take their options at index 0.
-      // Reading only `request` reported a valid `http.get({ timeout: 5000 })` as having none.
-      // The (url, options, cb) overload puts them at index 1, so accept an object literal in
-      // either position; pickConfigArg only treats an ObjectLiteralExpression as readable.
-      return method === 'request' || method === 'get' ? 0 : undefined
+    // 'request', 'request-promise' and 'node:http' are deliberately absent: their overloads are
+    // ambiguous and are resolved by SHAPE_PROBED below, not by a guessed index.
     default:
       return undefined
   }
+}
+
+/**
+ * The clients whose options argument cannot be located by index.
+ *
+ * `request(options, cb)` and `http.request(options, cb)` put options FIRST; `request.get(url,
+ * options, cb)` and `http.request(url, options, cb)` put them SECOND. Choosing between those
+ * from `kind x method` was wrong in both directions, verified against the built 0.3.4:
+ * `rp.get({ uri, timeout: 5000 })` picked index 1, found nothing, and reported a false
+ * no-timeout at error severity; `https.get(url, cb)` picked index 0, found the url string, and
+ * abstained on a call that genuinely has no timeout. Their shapes are distinguishable by
+ * looking at the arguments, so look.
+ */
+const SHAPE_PROBED = new Set<ClientBinding['kind']>(['request', 'request-promise', 'node:http'])
+
+/** A url positional argument. Never the options object. */
+const isUrlArg = (n: Node): boolean => {
+  const k = n.getKind()
+  return (
+    k === SyntaxKind.StringLiteral ||
+    k === SyntaxKind.NoSubstitutionTemplateLiteral ||
+    // A TemplateExpression too: `\`${base}/users\`` is just as much a url as a plain literal,
+    // and omitting it would leave every interpolated url looking like an unreadable config.
+    k === SyntaxKind.TemplateExpression
+  )
+}
+
+/**
+ * A callback positional argument. Never the options object.
+ *
+ * Load-bearing, not tidiness: `https.get(url, () => {})` is THE canonical node:http shape. Left
+ * unclassified, the callback at index 1 reads as an unreadable config and the call stays silent,
+ * so the headline false negative would survive a fix that looked like it addressed it.
+ */
+export const isCallbackArg = (n: Node): boolean => {
+  const k = n.getKind()
+  return k === SyntaxKind.ArrowFunction || k === SyntaxKind.FunctionExpression
+}
+
+/** Resolve the options argument of an ambiguous-overload client by argument shape. */
+function probeConfigArg(call: CallExpression): ConfigArg {
+  let sawUnclassifiable = false
+  // Only the first two positions: a third argument is the callback in every supported overload.
+  for (const a of call.getArguments().slice(0, 2)) {
+    if (isUrlArg(a) || isCallbackArg(a)) continue
+    if (a.getKind() === SyntaxKind.ObjectLiteralExpression) return { kind: 'object', node: a }
+    // Do NOT return here. `http.request(new URL(u), { timeout: 5000 }, cb)` has an
+    // unclassifiable argument at index 0 and a perfectly readable config at index 1; giving up
+    // on first sight of one would lose it.
+    sawUnclassifiable = true
+  }
+  return sawUnclassifiable ? { kind: 'unreadable' } : { kind: 'absent' }
 }
 
 /**
@@ -93,6 +205,7 @@ type ConfigArg =
   | { kind: 'absent' } // no argument at the expected index at all, or no expected index
 
 function configArg(call: CallExpression, binding: ClientBinding): ConfigArg {
+  if (SHAPE_PROBED.has(binding.kind)) return probeConfigArg(call)
   const idx = configArgIndex(binding.kind, methodOf(call))
   if (idx === undefined) return { kind: 'absent' }
   const arg = call.getArguments()[idx]
@@ -209,20 +322,35 @@ export function resolveOptions(
 ): Pick<CallOptions, 'timeoutMs' | 'retry'> {
   const arg = configArg(call, binding)
   const config = arg.kind === 'object' ? arg.node : undefined
+  // A readable object that nonetheless hides keys behind a spread. Absence and disablement
+  // become unprovable; explicit properties are still read. See hasSpread.
+  // `extra` are object literals a readable spread can contribute; look them up as though they
+  // were written inline. `opaque` means at least one spread hides its keys entirely.
+  const { opaque, extra } = config ? analyseSpreads(config) : { opaque: false, extra: [] }
+  const lookup = (name: string): PropLookup | undefined => {
+    if (!config) return undefined
+    const own = prop(config, name)
+    if (own) return own
+    for (const e of extra) {
+      const found = prop(e, name)
+      if (found) return found
+    }
+    return undefined
+  }
 
   // 'unknown' only when a config argument EXISTS but isn't statically readable. When there is
   // genuinely no config argument (arg.kind === 'absent'), timeoutMs/retry start at their
   // PROVEN-ABSENT values below, same as before this fix.
   let timeoutMs: CallOptions['timeoutMs'] = arg.kind === 'unreadable' ? 'unknown' : null
   if (config) {
-    const t = prop(config, 'timeout')
+    const t = lookup('timeout')
     if (t) {
       if (!t.shorthand && t.initializer.getKind() === SyntaxKind.NumericLiteral) {
         const n = Number(t.initializer.getText())
         // axios (and others) document `timeout: 0` as "no timeout", its own default, so a
         // literal 0 must NOT suppress no-timeout; leave timeoutMs unset and let the
         // instance-default fallback below still apply.
-        timeoutMs = n === 0 ? null : n
+        timeoutMs = n === 0 ? (opaque ? 'unknown' : null) : n
       } else if (
         !t.shorthand &&
         (t.initializer.getKind() === SyntaxKind.NullKeyword ||
@@ -230,15 +358,15 @@ export function resolveOptions(
       ) {
         // `timeout: null` / `timeout: undefined` are falsy and set no timeout, exactly like 0.
         // Treating "the key is present" as protection suppressed no-timeout on calls that had
-        // explicitly written the timeout away.
-        timeoutMs = null
+        // explicitly written the timeout away. A spread still blocks the absence conclusion.
+        timeoutMs = opaque ? 'unknown' : null
       } else {
         // `{ timeout }` shorthand, or a non-literal value (variable/expression): a timeout IS
         // configured but its value isn't statically known here.
         timeoutMs = 'instance-default'
       }
     } else {
-      const sig = prop(config, 'signal')
+      const sig = lookup('signal')
       if (sig) {
         const m = !sig.shorthand
           ? /AbortSignal\.timeout\(\s*(\d+)\s*\)/.exec(sig.initializer.getText())
@@ -249,6 +377,9 @@ export function resolveOptions(
         // not exist; 'unknown' says what is actually true. Both keep no-timeout silent, so this
         // changes the model's honesty rather than the findings.
         timeoutMs = m ? Number(m[1]) : 'unknown'
+      } else if (opaque) {
+        // No `timeout` and no `signal` of its own, but a spread may carry either.
+        timeoutMs = 'unknown'
       }
     }
   }
@@ -267,11 +398,12 @@ export function resolveOptions(
       : arg.kind === 'unreadable'
         ? 'unknown'
         : 'none'
-  if (retry === 'none' && config && (prop(config, 'retry') || prop(config, 'retries')))
-    retry = 'library'
+  if (retry === 'none' && config && (lookup('retry') || lookup('retries'))) retry = 'library'
+  // Same contract as timeoutMs: a spread may carry `retry`/`retries`, so absence is unprovable.
+  if (retry === 'none' && opaque) retry = 'unknown'
   // An explicit `retry: 0` / `retry: { limit: 0 }` overrides both the client-kind default and
   // the presence check above: the call was deliberately configured NOT to retry.
-  if (retry === 'library' && retryExplicitlyDisabled(config)) retry = 'none'
+  if (retry === 'library' && retryExplicitlyDisabled(config)) retry = opaque ? 'unknown' : 'none'
   // A hand-rolled retry loop is not proof of retry, but it is proof that absence of retry
   // cannot be shown, so abstain instead of warning. See isInManualRetryLoop for why this is
   // narrower than the loop-ancestor heuristic that preceded it.
