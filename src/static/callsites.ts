@@ -333,11 +333,23 @@ export function findCallSites(
       // `fetch` exists anywhere in it, too coarse. Re-check per call site, syntactically, by
       // walking this call's own ancestor scopes, so a shadowed `fetch` elsewhere in the file
       // doesn't erase a genuine native-fetch call site here.
-      if (isFetchShadowedHere(call)) continue
-      // Fall back to the global ONLY when nothing in the file binds the name. `clients` holds a
-      // binding when the import came from a known client module; a local wrapper leaves it
-      // empty, and assuming the global there invents a call site that does not exist.
-      b = clients.get('fetch') ?? (fetchIsImported ? undefined : NATIVE_FETCH)
+      const resolved = clients.get('fetch')
+      // A KNOWN client module that binds the name wins outright. `const fetch =
+      // require('node-fetch')` declares a variable called `fetch`, so the shadow walk below
+      // treats it as shadowing the global and skipped the call entirely, losing every
+      // node-fetch call site written in CommonJS. The "shadow" there IS the client.
+      if (resolved && resolved.kind !== 'fetch') {
+        b = resolved
+      } else {
+        // Task 4's registry suppressed `fetch` for the WHOLE FILE when any local binding named
+        // `fetch` existed anywhere in it, which was too coarse. Re-check per call site by
+        // walking this call's own ancestor scopes, so a shadowed `fetch` elsewhere in the file
+        // does not erase a genuine native-fetch call here.
+        if (isFetchShadowedHere(call)) continue
+        // Fall back to the global ONLY when nothing in the file binds the name. A local wrapper
+        // leaves `clients` empty, and assuming the global there invents a call site.
+        b = resolved ?? (fetchIsImported ? undefined : NATIVE_FETCH)
+      }
     } else {
       b = binding ? clients.get(binding) : undefined
     }
