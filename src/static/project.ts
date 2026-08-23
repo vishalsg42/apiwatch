@@ -26,7 +26,19 @@ export function createProjects(ws: Workspace) {
         target: ts.ScriptTarget.ES2023,
       },
     })
-    project.addSourceFilesAtPaths(files)
-    return { dir, project }
+    // Add each known path directly rather than through addSourceFilesAtPaths, which treats its
+    // argument as a GLOB and walks the directory tree again. discoverWorkspace already produced
+    // the exact file list, so that second walk is pure waste, and it crashed the whole run with
+    // a raw EACCES stack trace when any directory under the root was unreadable. A file that
+    // cannot be read is counted, not fatal, so an audit still reports what it could see.
+    let unreadable = 0
+    for (const f of files) {
+      try {
+        project.addSourceFileAtPath(f)
+      } catch {
+        unreadable++
+      }
+    }
+    return { dir, project, unreadable }
   })
 }

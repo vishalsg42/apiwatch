@@ -24,6 +24,7 @@ export const ws: Workspace = {
   packageDirs: ['/repo'],
   dependencies: {},
   nonShippingFilesExcluded: 0,
+  unreadableDirs: 0,
 }
 
 export async function projectsFor(fixture: string) {

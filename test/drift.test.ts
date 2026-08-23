@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -116,5 +116,58 @@ export const load = () => axios.get('https://api.vendor.dev/one', { timeout: 500
     const r = await run(['audit', '--root', sub, '--baseline', join(dir, 'bl.json')])
     expect(r.code).toBe(2)
     expect(r.out).toMatch(/root/i)
+  })
+})
+
+describe('partial analysis is never silently compared', () => {
+  it('refuses to write a baseline when files could not be analysed', async () => {
+    const dir = repo(ONE)
+    const secret = join(dir, 'locked')
+    mkdirSync(secret)
+    writeFileSync(
+      join(secret, 'hidden.ts'),
+      "import axios from 'axios'\nexport const h = () => axios.get('https://x.dev/h')\n",
+    )
+    chmodSync(secret, 0o000)
+    try {
+      const r = await makeBaseline(dir)
+      expect(r.code).toBe(2)
+      expect(r.out).toMatch(/refusing to write a baseline/)
+    } finally {
+      chmodSync(secret, 0o755)
+    }
+  })
+
+  it('refuses to compare against a baseline when files could not be analysed', async () => {
+    const dir = repo(ONE)
+    await makeBaseline(dir)
+    const secret = join(dir, 'locked')
+    mkdirSync(secret)
+    writeFileSync(
+      join(secret, 'hidden.ts'),
+      "import axios from 'axios'\nexport const h = () => axios.get('https://x.dev/h')\n",
+    )
+    chmodSync(secret, 0o000)
+    try {
+      const r = await audit(dir, '--fail-on', 'error')
+      expect(r.code).toBe(2)
+      expect(r.out).toMatch(/refusing to compare a partial run/)
+    } finally {
+      chmodSync(secret, 0o755)
+    }
+  })
+
+  it('does not crash with a raw stack trace on an unreadable directory', async () => {
+    const dir = repo(ONE)
+    const secret = join(dir, 'locked')
+    mkdirSync(secret)
+    chmodSync(secret, 0o000)
+    try {
+      const r = await run(['audit', '--root', dir, '--json'])
+      expect(r.code).toBe(0)
+      expect(JSON.parse(r.out).schemaVersion).toBe(2)
+    } finally {
+      chmodSync(secret, 0o755)
+    }
   })
 })

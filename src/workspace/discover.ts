@@ -71,6 +71,7 @@ export async function discoverWorkspace(
   root: string,
   opts: DiscoverOptions = {},
 ): Promise<Workspace> {
+  let unreadableDirs = 0
   const sourceFiles: string[] = [],
     nonShipping: string[] = [],
     packageDirs: string[] = []
@@ -82,6 +83,11 @@ export async function discoverWorkspace(
     try {
       entries = await readdir(dir, { withFileTypes: true })
     } catch {
+      // A directory that cannot be listed is COUNTED, not silently dropped. Returning quietly
+      // here meant its files were never discovered, so nothing downstream could tell the
+      // difference between "this repo has no findings there" and "this run could not look".
+      // A baseline written from such a run omits real findings permanently.
+      unreadableDirs++
       return
     }
     for (const e of entries) {
@@ -113,5 +119,6 @@ export async function discoverWorkspace(
     packageDirs,
     dependencies,
     nonShippingFilesExcluded: opts.includeNonShipping ? 0 : nonShipping.length,
+    unreadableDirs,
   }
 }

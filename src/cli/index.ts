@@ -271,6 +271,16 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     // reads as a pass, so say it out loud on stderr without failing the run.
     if (result.model.filesAnalysed === 0)
       process.stderr.write(`apiwatch: no source files found under ${root}\n`)
+    // Gate drift on partial analysis, not just baseline generation. This is the direction that
+    // actually loses safety: a file that failed to analyse contributes no findings, so its
+    // findings are neither reported nor matched against the baseline, and CI goes green on a
+    // repo nobody fully looked at.
+    if (baseline && result.model.filesSkipped > 0) {
+      io.write(
+        `apiwatch: ${result.model.filesSkipped} file(s) could not be analysed; refusing to compare a partial run against a baseline\n`,
+      )
+      return 2
+    }
     io.write(result.output)
     return result.code
   }

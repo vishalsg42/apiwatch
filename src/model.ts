@@ -78,6 +78,9 @@ export type Workspace = {
   sourceFiles: string[] // absolute, posix
   packageDirs: string[] // absolute, posix
   dependencies: Record<string, string> // merged deps+devDeps across all package.json files; on key collision the last file walked wins (non-deterministic in a monorepo)
+  /** Directories that could not be listed. Their files were never discovered, so any run with
+   * a non-zero count saw less than the whole repo. */
+  unreadableDirs: number
   nonShippingFilesExcluded: number // source files under examples/, benchmarks/, docs/ and the like that were left unaudited; 0 when includeNonShipping is set
 }
 

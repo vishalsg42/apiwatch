@@ -38,7 +38,9 @@ export async function runAudit(
   const projects = createProjects(ws)
   const registry = buildRegistry(projects)
   const sites: CallSite[] = []
-  let filesSkipped = 0
+  // A file that could not even be opened counts as skipped, exactly like one that threw during
+  // analysis. Both mean the run did not see everything, which is what the baseline gates on.
+  let filesSkipped = projects.reduce((n, p) => n + p.unreadable, 0) + ws.unreadableDirs
 
   for (const { project } of projects)
     for (const sf of project.getSourceFiles()) {
