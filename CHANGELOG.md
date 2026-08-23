@@ -7,6 +7,61 @@ apiwatch is pre-1.0, so minor versions may change behaviour. Each entry says whe
 more findings or fewer after upgrading, because a change in finding count is otherwise
 indistinguishable from a regression.
 
+## 0.3.4 (2026-08-23)
+
+**Expect fewer findings, and possibly some reclassified.** 0.3.3 fixed three CommonJS blind
+spots and created a false-positive class in the same commit: to make
+`const { request } = require('node:http')` resolve, every named export of a supported module was
+bound as an HTTP client. `createServer` is a server, the opposite of an outbound call, and it was
+reported as `no-timeout` at `error` severity, which fails builds.
+
+**Upgrading with a committed baseline: do not simply prune.** This release removes findings and
+can also reclassify them, so a baseline can hold both stale entries and a re-keyed equivalent of
+the same call. The safe sequence is:
+
+1. Change the pin to `apiwatch@0.3.4` (the README workflow is not rewritten by publishing).
+2. Run `apiwatch audit --baseline .apiwatch-baseline.json` and read both the new and the
+   resolved keys. Reclassification produces one of each for the same underlying call.
+3. Only then run `apiwatch baseline prune`.
+
+`fingerprintVersion` is unchanged, so existing baselines stay readable. The allowlist only
+removes bindings; it never re-keys a finding that survives.
+
+### Fixed
+
+- **Named exports are no longer automatically clients.** `createServer` (ESM and CJS),
+  `isAxiosError`, `Agent`, `Headers` and `request-promise`'s `defaults` no longer produce call
+  sites. A named import counts only when that export is itself a callable request function;
+  default and namespace imports are unaffected. A test asserting `defaults()` was a call site
+  had been defending the bug.
+- **Factories are bound, not silenced.** `create` (axios, got), `extend` (got) and `defaults`
+  (request) are real exports, so excluding them would have turned one misplaced finding into
+  zero. They now bind an instance that `create({...})` derives from, and the bare factory call
+  itself no longer reports.
+- **`require(spec).name` is parsed structurally.** A prefix-only regex matched
+  `require('node:http')` inside `require('node:http').createServer` and bound the whole module.
+- **Quoted destructuring keys resolve.** `const { 'api': client } = require('./http')` produced
+  nothing, because the key reads back as `"'api'"` with the quotes attached. The cross-module
+  registry had the same latent bug, so the call vanished silently rather than loudly.
+- **`baseline accept` and `baseline prune` compare counts, not just keys.** With two structurally
+  identical calls, a repo could reach a state with no way back to green: the second call was
+  correctly reported as new, and `accept` answered "nothing new to accept". accept now raises a
+  count to the current run's and prune lowers it. Neither crosses the other: accept cannot turn a
+  green audit red, prune cannot turn a red audit green.
+- **`readBaseline` validates counts.** They are arithmetic now, not a display field, so a
+  hand-edited `0`, `-1` or `"2"` is rejected rather than computed with.
+
+### Known limitations, unchanged
+
+Bindings are file-wide and name-keyed, so a genuine `request` in one scope and a `createServer`
+aliased to `request` in another still collide. Scope-aware resolution is a refactor, not a patch
+release. And baseline counts carry no occurrence identity: removing one accepted duplicate while
+adding a structurally identical call in the same scope still reads as no change.
+
+Verified against 0.3.3 on five real repositories (Outline, Documenso and three private backends,
+518 findings in total): zero findings removed, zero added. The false positives this fixes did not
+appear in that sample, so the corpus statistics are unaffected by it.
+
 ## 0.3.3 (2026-08-23)
 
 **Expect more findings on CommonJS codebases.** Three import shapes were silently invisible.

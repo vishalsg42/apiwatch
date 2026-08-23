@@ -120,7 +120,7 @@ jobs:
       # legitimately ADD findings (0.3.3 made three CommonJS import shapes visible), which
       # would fail your build on a version bump you never made. Upgrade deliberately, and run
       # `apiwatch baseline accept` if the new findings are ones you are accepting.
-      - run: npx apiwatch@0.3.3 audit --baseline .apiwatch-baseline.json --fail-on error
+      - run: npx apiwatch@0.3.4 audit --baseline .apiwatch-baseline.json --fail-on error
 ```
 
 The baseline survives ordinary work: inserting lines, reformatting, reordering calls, renaming a
