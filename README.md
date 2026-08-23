@@ -120,7 +120,7 @@ jobs:
       # legitimately ADD findings (0.3.3 made three CommonJS import shapes visible), which
       # would fail your build on a version bump you never made. Upgrade deliberately, and run
       # `apiwatch baseline accept` if the new findings are ones you are accepting.
-      - run: npx apiwatch@0.3.4 audit --baseline .apiwatch-baseline.json --fail-on error
+      - run: npx apiwatch@0.3.5 audit --baseline .apiwatch-baseline.json --fail-on error
 ```
 
 The baseline survives ordinary work: inserting lines, reformatting, reordering calls, renaming a
@@ -144,8 +144,22 @@ reported, not enforced. A gate that punishes fixing things gets switched off.
 invisible calls visible, so a committed baseline will not cover them and CI goes red on a version
 bump. That is the fix working, not a regression. Pin the version in your workflow, upgrade
 deliberately, and run `apiwatch baseline accept` to take on the newly visible findings. 0.3.3 is
-the current example: it made three CommonJS import shapes visible, and one real backend went from
-93 to 110 call sites.
+one example: it made three CommonJS import shapes visible, and one real backend went from 93 to
+110 call sites.
+
+**Some releases change finding IDENTITY, and then `accept` will not work.** A finding is keyed by
+a fingerprint, and a release that changes how fingerprints are derived bumps `fingerprintVersion`
+so the mismatch is detected rather than silently comparing incomparable keys. `audit`, `accept`
+and `prune` all stop with a clear message, and `apiwatch baseline` regenerates the file in place.
+Review before you regenerate, because regenerating accepts everything currently visible:
+
+```bash
+apiwatch audit --fail-on error          # no --baseline: see everything, including what is new
+apiwatch baseline --out .apiwatch-baseline.json   # regenerates over the stale file
+```
+
+The regeneration reports how many `error`-severity findings it absorbed, so a genuine one cannot
+slip through as a line in a count. 0.3.5 is the current example.
 
 ## Measuring a corpus
 
@@ -212,6 +226,9 @@ Every one of these is a real, measured gap, not a hedge.
 - **Hand-rolled retry loops make `no-retry` abstain, they do not count as retry.** Library-backed retry (`axios-retry`, `p-retry`, `got`'s built-in retry, an explicit `retry`/`retries` option) is proof of retry. A hand-rolled loop is not, but it is proof that absence of retry cannot be shown, so the rule goes quiet rather than warning. A loop qualifies only when all three hold: the call's nearest loop is a counting `for`/`while`/`do`, the call is inside a `try`, and that `try` contains a `continue` owned by that same loop. Pagination advances on the success path and either needs no `continue` or `break`s out on failure, so it keeps being reported. An earlier heuristic asked only "is there a loop ancestor" and read 22 of 93 sites in one repo as retry, silently suppressing every genuine finding; this one was validated against both shapes, abstaining on 47 of 68 sites in a backend that hand-rolls retry in every provider and on 0 of 93 in the pagination-heavy repo that killed its predecessor. The remaining known gap is a retry loop that re-enters without a `continue` (for example one that only sets a flag), which is still reported.
 - **`signal: controller.signal` is treated as protected.** A bare `AbortController` with no timeout ever attached to it is statically indistinguishable from one wired to `setTimeout(() => controller.abort(), ms)` elsewhere in the file, so `no-timeout` can stay silent on a fetch that's only manually cancellable, never time-bounded.
 - **Clients built by a factory function, or injected via DI other than `@nestjs/axios`, may be missed entirely**, a false negative, not a false positive.
+- **A spread hides what it carries, so absence cannot be proven through one.** `{ ...defaults }` makes `no-timeout` and `no-retry` abstain rather than fire, because apiwatch cannot see which keys the spread contributes. A spread whose operand is written inline (`...(body && { data })`, including through `||` and ternaries) is read as though written inline, so it does not suppress anything. The cost is a real false negative: a call that genuinely sets no timeout next to an opaque spread is not reported.
+- **A verb destructured from an existing binding is invisible.** `const rp = require('request-promise'); const { get } = rp; get(url)` binds nothing, because only destructuring directly from a `require(...)` is recognised. `const { get } = require('axios')` is also missed: it is valid CommonJS, but the named-export allowlist lists only `default` for axios, and widening it is how the 0.3.3 `createServer` regression happened.
+- **apiwatch can exhaust the default Node heap on a very large monorepo.** Observed on a public-corpus scan, which died with `FATAL ERROR: Ineffective mark-compacts near heap limit`. Audit one package at a time with `--root packages/<name>`, or raise the heap with `NODE_OPTIONS=--max-old-space-size=8192`.
 - **`unvalidated-response` stays silent when it can't follow the value.** Absence of a finding is not proof a response is validated.
 - **Any `.parse()`/`.validate()`-named call in the enclosing function counts as validation**, as long as the file imports a validator library: apiwatch checks the call's own name and receiver, not that the value it's called on is actually the response. A response handed to some other `.parse()`-named call in the same function (not `JSON.parse`/`Date.parse`, which are explicitly excluded) can read as validated when it isn't.
 - **A client shared across CommonJS modules, or required lazily inside a function body, is resolved**, but a client passed around through less direct means (a factory function's return value, a namespace object's property, DI other than `@nestjs/axios`) may still be invisible, the same false-negative gap that already existed for ESM.

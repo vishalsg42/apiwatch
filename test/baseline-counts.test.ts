@@ -157,3 +157,51 @@ describe('baseline count validation', () => {
     expect(r.out).toMatch(/invalid count/)
   })
 })
+
+/**
+ * Before this was fixed the recovery path was a closed loop, verified end to end: `audit` said
+ * to regenerate with `apiwatch baseline`; `baseline` refused to overwrite and pointed at
+ * `accept`/`prune`; both of those re-threw the same version mismatch. No message anywhere
+ * mentioned deleting the file, so a FP_VERSION bump left every baselined repo permanently red.
+ */
+describe('a baseline from an older fingerprintVersion can be regenerated', () => {
+  const staleBaseline = async (dir: string) => {
+    await makeBaseline(dir)
+    const b = JSON.parse(readFileSync(bl(dir), 'utf8'))
+    b.fingerprintVersion = b.fingerprintVersion - 1
+    writeFileSync(bl(dir), JSON.stringify(b, null, 2))
+  }
+
+  it('refuses accept and prune, which cannot rewrite a stale identity', async () => {
+    const dir = repo(src(1))
+    await staleBaseline(dir)
+    expect((await accept(dir)).code).toBe(2)
+    expect((await prune(dir)).code).toBe(2)
+  })
+
+  it('regenerates rather than refusing, and returns the audit to green', async () => {
+    const dir = repo(src(1))
+    await staleBaseline(dir)
+    const r = await run(['baseline', '--root', dir, '--out', bl(dir)])
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/regenerating/)
+    expect((await audit(dir)).code).toBe(0)
+  })
+
+  // Regenerating accepts everything visible, so a genuine build-failing finding must not pass
+  // as one number in a count.
+  it('names the error-severity findings it just absorbed', async () => {
+    const dir = repo(src(1))
+    await staleBaseline(dir)
+    const r = await run(['baseline', '--root', dir, '--out', bl(dir)])
+    expect(r.out).toMatch(/error severity/)
+  })
+
+  it('still refuses to clobber a baseline whose version matches', async () => {
+    const dir = repo(src(1))
+    await makeBaseline(dir)
+    const r = await run(['baseline', '--root', dir, '--out', bl(dir)])
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/already exists/)
+  })
+})

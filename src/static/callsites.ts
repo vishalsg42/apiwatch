@@ -144,7 +144,7 @@ function isFetchShadowedHere(call: CallExpression): boolean {
  * Bumped whenever the fingerprint derivation below changes, so a baseline written by an older
  * apiwatch is detectably incompatible rather than silently mismatching every entry.
  */
-export const FP_VERSION = 1
+export const FP_VERSION = 2
 
 /** Every loop-free ancestor kind that owns a nameable scope. */
 const NAMED_SCOPE_KINDS = new Set([

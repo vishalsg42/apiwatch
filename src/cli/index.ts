@@ -13,6 +13,7 @@ import {
   writeEntries,
 } from '../baseline.js'
 import type { CliIo } from '../model.js'
+import { FP_VERSION } from '../static/callsites.js'
 import { runAudit } from './audit.js'
 
 const USAGE = `apiwatch: audit outbound HTTP calls
@@ -155,6 +156,22 @@ export function parseAuditArgs(
  * entries and accepts new findings is a footgun: the natural time to run it is right after CI
  * fails, which is exactly when accepting everything currently visible is wrong.
  */
+/**
+ * The fingerprintVersion stored in an existing baseline, but ONLY when it differs from this
+ * build's. Returns undefined for a matching version and for a file that cannot be read or
+ * parsed, so a corrupt baseline is still protected by the normal refusal rather than silently
+ * overwritten.
+ */
+function staleFingerprintVersion(path: string): number | undefined {
+  try {
+    const v = (JSON.parse(readFileSync(path, 'utf8')) as { fingerprintVersion?: unknown })
+      .fingerprintVersion
+    return typeof v === 'number' && v !== FP_VERSION ? v : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function runBaseline(argv: string[], io: CliIo): Promise<number> {
   const sub = argv[1] === 'prune' || argv[1] === 'accept' ? argv[1] : undefined
   const parsed = parseAuditArgs(argv.slice(sub ? 2 : 1), io, ['--allow-partial'], ['--out'])
@@ -187,13 +204,33 @@ async function runBaseline(argv: string[], io: CliIo): Promise<number> {
       // Refuse to clobber: regenerating from scratch means "accept everything visible", which
       // is never what someone wants by accident.
       if (existsSync(out)) {
+        // A baseline written for a DIFFERENT fingerprintVersion is the one case where refusing
+        // to overwrite is a dead end rather than a safeguard. Verified before this fix: `audit`
+        // said to regenerate with `apiwatch baseline`, `baseline` refused and pointed at
+        // `accept`/`prune`, and both of those re-threw the version mismatch. There was no exit,
+        // and no message anywhere mentioned deleting the file. Regenerating is exactly what the
+        // other three commands already tell the user to do, so let it happen.
+        const stale = staleFingerprintVersion(out)
+        if (stale === undefined) {
+          io.write(
+            `apiwatch: ${out} already exists; use \`apiwatch baseline accept\` to add new findings or \`apiwatch baseline prune\` to drop resolved ones\n`,
+          )
+          return 2
+        }
         io.write(
-          `apiwatch: ${out} already exists; use \`apiwatch baseline accept\` to add new findings or \`apiwatch baseline prune\` to drop resolved ones\n`,
+          `apiwatch: ${out} was written for fingerprintVersion ${stale} and this apiwatch uses ${FP_VERSION}; regenerating\n`,
         )
-        return 2
       }
       const b = writeBaseline(out, result.model.findings, version(), options)
       io.write(`apiwatch: wrote ${b.accepted.length} accepted finding(s) to ${out}\n`)
+      // Regenerating accepts everything currently visible, which is the one thing the refusal
+      // above exists to prevent doing by accident. Name the build-failing findings it just
+      // absorbed so a genuine one cannot pass as a line in a count.
+      const errors = result.model.findings.filter((f) => f.severity === 'error').length
+      if (errors > 0)
+        io.write(
+          `apiwatch: ${errors} of those are error severity and would have failed a build; review them with \`apiwatch audit --fail-on error\`\n`,
+        )
       return 0
     }
 

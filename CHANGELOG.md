@@ -7,6 +7,68 @@ apiwatch is pre-1.0, so minor versions may change behaviour. Each entry says whe
 more findings or fewer after upgrading, because a change in finding count is otherwise
 indistinguishable from a regression.
 
+## 0.3.5 (2026-08-23)
+
+**Findings move in both directions, and every baseline must be regenerated.** Four independent
+defects in how a call's config object is located and read. Three produced `error`-severity false
+positives, which fail builds on correct code; one collapsed distinct calls into a single baseline
+identity.
+
+### Regenerating your baseline
+
+`fingerprintVersion` moves from 1 to 2, so `audit`, `accept` and `prune` all stop with a clear
+message until the baseline is regenerated. Review first, because regenerating accepts everything
+currently visible:
+
+```bash
+apiwatch audit --fail-on error                     # no --baseline: see everything, new included
+apiwatch baseline --out .apiwatch-baseline.json    # regenerates over the stale file
+```
+
+The second command now reports how many `error`-severity findings it absorbed. Previously it
+refused to run at all, which made the upgrade path a closed loop: `audit` said to regenerate with
+`apiwatch baseline`, `baseline` refused and pointed at `accept`/`prune`, and both of those
+re-threw the version mismatch. Nothing mentioned deleting the file. That is fixed here.
+
+### Fixed
+
+- **A spread in a config object was read as proof of absence.** `axios.get(url, { ...cfg })`
+  reported `no-timeout` at `error` severity while `axios.get(url, cfg)` correctly abstained, and
+  that asymmetry is what marked it as an oversight. A spread now makes absence and disablement
+  unprovable. Spreads whose keys are statically visible, including through `&&`, `||` and
+  ternaries, are still read: `...(body && { data })` hides nothing, so a genuinely missing timeout
+  next to one is still reported.
+- **The options argument is located by argument shape** for `request`, `request-promise` and
+  `node:http`, whose overloads are ambiguous. Choosing an index from client and method was wrong
+  in both directions: `rp.get({ uri, timeout: 5000 })` looked at index 1, found nothing and
+  reported a false `no-timeout`; `https.get(url, cb)` looked at index 0, found the url string and
+  stayed silent on a call that genuinely has no timeout.
+- **`https.get(url, callback)` is reported.** Callbacks are recognised as callbacks, so the most
+  common `node:http` shape is no longer mistaken for an unreadable config.
+- **A named or destructured method import keeps its verb.** `const { post } = require('request-promise')`
+  had no method at all, so `no-retry` fired on a POST (`undefined` counts as idempotent by design)
+  and evidence printed `request-promise()` with the verb missing. Preserved through renames, and
+  `del` normalises to `delete`.
+- **An options object's `host` is its target, and a callback never is.** With neither `url` nor
+  `uri` present, `pickUrlArg` fell through to the first non-object argument, which for
+  `http.request({ host, path }, cb)` is the callback. Since the url feeds the fingerprint, two
+  calls to different hosts collapsed into one identity: two findings, one fingerprint, stored as a
+  single baseline entry with count 2, so fixing one and adding another left the audit green.
+
+### Testing
+
+A `client x import shape x call shape x polarity` matrix replaces presence-only coverage.
+`client-matrix` asserted `toHaveLength(1)` and nothing else, which is how these shipped. Rows
+assert `timeoutMs` as `null` (proven absent) versus `'unknown'` (abstain), because every false
+positive fixed here could equally be silenced by making the rule abstain. Verified against the
+0.3.4 tree: 26 of 31 rows fail there. `node:https` had no coverage at all before this.
+
+### Known limitations, unchanged or newly documented
+
+A verb destructured from an existing binding (`const { get } = rp`) is still invisible, as is
+`const { get } = require('axios')`. apiwatch can exhaust the default Node heap on a very large
+monorepo; audit one package at a time with `--root packages/<name>` or raise the heap.
+
 ## 0.3.4 (2026-08-23)
 
 **Expect fewer findings, and possibly some reclassified.** 0.3.3 fixed three CommonJS blind
