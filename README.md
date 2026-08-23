@@ -6,7 +6,7 @@
 [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/apiwatch.svg)](https://www.npmjs.com/package/apiwatch)
 
-A zero-config CLI that statically audits outbound third-party HTTP calls in your Node/TypeScript repo: no timeout, no retry, no response validation, parses each file once with no type resolution, and never runs your code.
+A zero-config CLI that statically audits outbound HTTP calls in your Node/TypeScript repo: no timeout, no retry, no response validation, parses each file once with no type resolution, and never runs your code.
 
 ```
 npx apiwatch audit
@@ -54,8 +54,8 @@ npx apiwatch audit --root outline
 
   ✖ no-timeout                6
   ⚠ no-retry                  6
-  ⚠ deprecated-client         1
   ⚠ unvalidated-response      2
+  ℹ legacy-client             1
 
   app/components/Lightbox.tsx:663  fetch call sets no timeout, so it has no deadline of its own
   plugins/notion/server/notion.ts:199  fetch call sets no timeout, so it has no deadline of its own
@@ -131,8 +131,9 @@ See [`examples/vulnerable-service`](./examples/vulnerable-service) for what it d
 | `no-timeout` | error | call has no `timeout` option, no `AbortSignal.timeout()`, and no instance-level default; stays silent when the options object isn't statically readable (an options object passed as a variable, a spread, a conditional, ...), since that's neither proof of a timeout nor proof of its absence |
 | `no-retry` | warn | idempotent call (`get`/`head`/`options`/`put`/`delete`) has no library-backed retry; also flags a call whose method can't be statically determined at all, on the assumption that an unreadable method is safer to warn on than to silently skip; a property-access `.options()` call is never tracked as a call site in the first place, so it can only ever be flagged via an explicit `method: 'options'` in a bare call's config object. Like `no-timeout`, it stays silent when the options object itself isn't statically readable |
 | `unvalidated-response` | warn | response body is used without reaching a schema validator (zod/Joi/yup/ajv/class-validator) |
-| `deprecated-client` | warn | file imports the unmaintained `request` or `request-promise` packages, or `node-fetch@2` |
-| `hardcoded-host` | warn | a literal, non-loopback host string is embedded in source |
+| `deprecated-client` | warn | file imports the unmaintained `request` or `request-promise` packages |
+| `legacy-client` | info | file imports `node-fetch@2`, which the global `fetch` in Node >= 18 supersedes. Not deprecated, just usually removable |
+| `hardcoded-host` | info | a literal, non-loopback host string is embedded in source |
 
 ## Limitations
 

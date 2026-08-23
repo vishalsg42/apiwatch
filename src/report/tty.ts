@@ -26,10 +26,11 @@ export function renderTty(m: ReportModel): string {
   // list below is capped: a repo with hundreds of findings still gets an honest total.
   for (const [rule, n] of Object.entries(m.countsByRule)) {
     const sev = m.findings.find((f) => f.rule === rule)?.severity
-    L.push(
-      `  ${c(sev === 'error' ? '31' : '33', sev === 'error' ? '✖' : '⚠')} ` +
-        `${rule.padEnd(22)} ${String(n).padStart(4)}`,
-    )
+    // Three severities, three glyphs. Rendering 'info' as a warning made a note about a
+    // hardcoded host look like a defect, which is the dilution this severity exists to avoid.
+    const glyph = sev === 'error' ? '✖' : sev === 'warn' ? '⚠' : 'ℹ'
+    const colour = sev === 'error' ? '31' : sev === 'warn' ? '33' : '2'
+    L.push(`  ${c(colour, glyph)} ${rule.padEnd(22)} ${String(n).padStart(4)}`)
   }
   L.push('')
   for (const f of m.findings.slice(0, DETAIL_CAP))

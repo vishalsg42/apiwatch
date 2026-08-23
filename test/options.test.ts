@@ -16,9 +16,12 @@ describe('resolveOptions', () => {
     expect((await siteAt('native-fetch', 'svc.ts', /fetch\(/)).options.timeoutMs).toBeNull())
   it('treats AbortSignal.timeout as a timeout', async () =>
     expect((await siteAt('abort-signal', 'svc.ts', /fetch\(/)).options.timeoutMs).toBe(2000))
-  it('treats a controller signal as a timeout', async () =>
+  // A bare `controller.signal` may only ever be aborted by hand, or never. Whether a setTimeout
+  // is wired to it elsewhere is not knowable at the call site, so 'unknown' is the honest
+  // verdict. no-timeout stays silent either way; only the claim changes.
+  it('treats a bare controller signal as unknown, not a proven deadline', async () =>
     expect((await siteAt('abort-controller', 'svc.ts', /fetch\(/)).options.timeoutMs).toBe(
-      'instance-default',
+      'unknown',
     ))
   it('binds axios-retry to the instance it configures', async () =>
     expect((await siteAt('retry-wrapped', 'svc.ts', /api\.get/)).options.retry).toBe('library'))

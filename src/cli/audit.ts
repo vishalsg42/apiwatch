@@ -69,11 +69,14 @@ export async function runAudit(
       output += `\nwarning: could not write .apiwatch/audit.md (${reason})\n`
     }
   }
+  // 'info' never gates a build, not even under --fail-on warn. A hardcoded vendor host or a
+  // removable node-fetch@2 is worth surfacing, but failing CI on it would train people to pass
+  // --fail-on error and lose the warnings that do matter.
   const breach =
     opts.failOn === 'error'
       ? findings.some((f) => f.severity === 'error')
       : opts.failOn === 'warn'
-        ? findings.length > 0
+        ? findings.some((f) => f.severity === 'error' || f.severity === 'warn')
         : false
   return { code: breach ? 1 : 0, output, model, sites }
 }

@@ -60,14 +60,34 @@ describe('rules', () => {
     const s = site({ client: 'request-promise', fileImports: ['request-promise'] })
     expect(only('deprecated-client', [s])).toHaveLength(1)
   })
-  it('deprecated-client fires for node-fetch v2 but not v3', () => {
-    const s = [site({ client: 'node-fetch', fileImports: ['node-fetch'] })]
+  // node-fetch@2 was never deprecated by its maintainers, only superseded by the global fetch.
+  // It moved to `legacy-client` at info severity, so migration advice stops carrying the same
+  // weight as depending on an abandoned package.
+  it('deprecated-client covers the request family, not node-fetch', () => {
+    const nf = [site({ client: 'node-fetch', fileImports: ['node-fetch'] })]
     expect(
-      only('deprecated-client', s, { ...ws, dependencies: { 'node-fetch': '^2.6.7' } }),
-    ).toHaveLength(1)
-    expect(
-      only('deprecated-client', s, { ...ws, dependencies: { 'node-fetch': '^3.3.0' } }),
+      only('deprecated-client', nf, { ...ws, dependencies: { 'node-fetch': '^2.6.7' } }),
     ).toHaveLength(0)
+    expect(
+      only('deprecated-client', [site({ client: 'request', fileImports: ['request'] })]),
+    ).toHaveLength(1)
+  })
+
+  it('legacy-client flags node-fetch v2 at info severity, but not v3', () => {
+    const nf = [site({ client: 'node-fetch', fileImports: ['node-fetch'] })]
+    const v2 = only('legacy-client', nf, { ...ws, dependencies: { 'node-fetch': '^2.6.7' } })
+    expect(v2).toHaveLength(1)
+    expect(v2[0].severity).toBe('info')
+    expect(
+      only('legacy-client', nf, { ...ws, dependencies: { 'node-fetch': '^3.3.0' } }),
+    ).toHaveLength(0)
+  })
+
+  it('info findings never fail CI, not even under --fail-on warn', () => {
+    const host = site({
+      url: { kind: 'literal', url: 'https://api.vendor.dev/x', host: 'api.vendor.dev' },
+    })
+    expect(only('hardcoded-host', [host])[0].severity).toBe('info')
   })
   it('hardcoded-host fires on an ip but not loopback', () => {
     const bad = site({

@@ -1,12 +1,12 @@
 import type { CallSite, Finding, Workspace } from '../model.js'
 export type Rule = {
   name: string
-  severity: 'error' | 'warn'
+  severity: 'error' | 'warn' | 'info'
   check(sites: CallSite[], ws: Workspace): Finding[]
 }
 const F = (
   rule: string,
-  severity: 'error' | 'warn',
+  severity: 'error' | 'warn' | 'info',
   s: CallSite,
   message: string,
   evidence: string,
@@ -96,28 +96,58 @@ export const unvalidatedResponse: Rule = {
 export const deprecatedClient: Rule = {
   name: 'deprecated-client',
   severity: 'warn',
-  check: (s, ws) => {
-    const nfMajor = Number(
-      (ws.dependencies['node-fetch'] ?? '').replace(/[^\d.]/g, '').split('.')[0] || '0',
-    )
+  check: (s) => {
     const seen = new Set<string>()
     const out: Finding[] = []
     for (const x of s) {
       // request-promise is a thin promise wrapper AROUND `request`, deprecated alongside its
       // dependency, not just similar to it. The README's own example output shows a
       // request-promise call site, so this rule missing it entirely was a real, visible gap.
+      // Only the request family. `request` was formally deprecated by its maintainers in
+      // February 2020; node-fetch@2 never was, it is merely superseded, so conflating the two
+      // put migration advice at the same severity as using an abandoned package. node-fetch@2
+      // moved to `legacy-client` at info severity.
       const isRequestFamily = x.client === 'request' || x.client === 'request-promise'
-      const bad = isRequestFamily || (x.client === 'node-fetch' && nfMajor === 2)
-      if (!bad || seen.has(x.file)) continue
+      if (!isRequestFamily || seen.has(x.file)) continue
       seen.add(x.file)
       out.push(
         F(
           'deprecated-client',
           'warn',
           x,
-          isRequestFamily
-            ? `\`${x.client}\` is unmaintained since 2020`
-            : '`node-fetch@2` is superseded by native fetch',
+          `\`${x.client}\` is unmaintained since 2020`,
+          `file imports ${x.client}`,
+        ),
+      )
+    }
+    return out
+  },
+}
+
+/**
+ * node-fetch@2 is not deprecated, it is superseded: modern Node has a global `fetch`, so the
+ * dependency is usually removable. That is migration advice, not a defect, so it is 'info' and
+ * never fails CI.
+ */
+export const legacyClient: Rule = {
+  name: 'legacy-client',
+  severity: 'info',
+  check: (s, ws) => {
+    const nfMajor = Number(
+      (ws.dependencies['node-fetch'] ?? '').replace(/[^\d.]/g, '').split('.')[0] || '0',
+    )
+    if (nfMajor !== 2) return []
+    const seen = new Set<string>()
+    const out: Finding[] = []
+    for (const x of s) {
+      if (x.client !== 'node-fetch' || seen.has(x.file)) continue
+      seen.add(x.file)
+      out.push(
+        F(
+          'legacy-client',
+          'info',
+          x,
+          '`node-fetch@2` is superseded by the global fetch in Node >= 18',
           `file imports ${x.client}`,
         ),
       )
@@ -127,16 +157,21 @@ export const deprecatedClient: Rule = {
 }
 
 const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?$/
+/**
+ * A literal vendor host is very often deliberate (`https://api.github.com/...`), so this is not
+ * a reliability defect on its own. It is 'info': visible, but it never fails CI and never
+ * dilutes the rules that do.
+ */
 export const hardcodedHost: Rule = {
   name: 'hardcoded-host',
-  severity: 'warn',
+  severity: 'info',
   check: (s) =>
     s
       .filter((x) => x.url.kind === 'literal' && !LOOPBACK.test(x.url.host))
       .map((x) =>
         F(
           'hardcoded-host',
-          'warn',
+          'info',
           x,
           `host \`${(x.url as { host: string }).host}\` is hardcoded in source`,
           (x.url as { url: string }).url,
@@ -149,6 +184,7 @@ export const rules: Rule[] = [
   noRetry,
   unvalidatedResponse,
   deprecatedClient,
+  legacyClient,
   hardcodedHost,
 ]
 

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import type { CliIo } from '../model.js'
 import { runAudit } from './audit.js'
 
-const USAGE = `apiwatch: audit outbound third-party HTTP calls
+const USAGE = `apiwatch: audit outbound HTTP calls
 
   apiwatch audit [--root <dir>] [--json] [--fail-on error|warn]
                  [--include-non-shipping]

@@ -59,7 +59,9 @@ export type CallSite = {
 
 export type Finding = {
   rule: string
-  severity: 'error' | 'warn'
+  // 'info' never fails CI, not even under --fail-on warn. It is for findings that are worth
+  // surfacing but are not defects on their own, such as a deliberately hardcoded vendor host.
+  severity: 'error' | 'warn' | 'info'
   callSiteId: string
   file: string
   line: number

@@ -223,6 +223,15 @@ export function resolveOptions(
         // literal 0 must NOT suppress no-timeout; leave timeoutMs unset and let the
         // instance-default fallback below still apply.
         timeoutMs = n === 0 ? null : n
+      } else if (
+        !t.shorthand &&
+        (t.initializer.getKind() === SyntaxKind.NullKeyword ||
+          t.initializer.getText() === 'undefined')
+      ) {
+        // `timeout: null` / `timeout: undefined` are falsy and set no timeout, exactly like 0.
+        // Treating "the key is present" as protection suppressed no-timeout on calls that had
+        // explicitly written the timeout away.
+        timeoutMs = null
       } else {
         // `{ timeout }` shorthand, or a non-literal value (variable/expression): a timeout IS
         // configured but its value isn't statically known here.
@@ -234,7 +243,12 @@ export function resolveOptions(
         const m = !sig.shorthand
           ? /AbortSignal\.timeout\(\s*(\d+)\s*\)/.exec(sig.initializer.getText())
           : null
-        timeoutMs = m ? Number(m[1]) : 'instance-default'
+        // Only AbortSignal.timeout(n) proves a deadline. A bare `controller.signal` may only
+        // ever be aborted by hand, or never, and whether a setTimeout is wired to it elsewhere
+        // is not knowable here. Calling that 'instance-default' asserted a protection that may
+        // not exist; 'unknown' says what is actually true. Both keep no-timeout silent, so this
+        // changes the model's honesty rather than the findings.
+        timeoutMs = m ? Number(m[1]) : 'unknown'
       }
     }
   }
