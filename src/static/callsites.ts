@@ -22,7 +22,7 @@ import {
 } from 'ts-morph'
 import type { CallSite, ClientBinding, Workspace } from '../model.js'
 import { collectFileImports } from './imports.js'
-import { configMethod, resolveOptions } from './options.js'
+import { configMethod, isCallbackArg, resolveOptions } from './options.js'
 import { classifyUrl } from './urls.js'
 import { isResponseValidated } from './validation.js'
 
@@ -401,7 +401,18 @@ export function findCallSites(
  * `request`'s options object may key the endpoint under `url:` or `uri:`; both are
  * documented, canonical usage, not an edge case.
  */
-const URL_PROP_NAMES = ['url', 'uri']
+// `url`/`uri` first, then node:http's own convention. Without host/hostname a call like
+// `http.request({ host, path }, cb)` found no url property and fell through to "first
+// non-object argument", which is the CALLBACK. Since urlKeyOf feeds the fingerprint, two calls
+// to different hosts in one function collapsed to a single identity: verified as 2 findings
+// sharing 1 fingerprint, stored as one baseline entry with count 2, so fixing one call and
+// adding another to a third host left the audit green.
+//
+// A bare host has no scheme, so classifyUrl still reports it as a variable rather than a
+// literal. That is deliberate: this restores IDENTITY without inventing new hardcoded-host
+// findings. `path` is not appended, because combining it would re-key calls that already
+// resolve correctly through `url`/`uri`.
+const URL_PROP_NAMES = ['url', 'uri', 'host', 'hostname']
 
 /**
  * The call's URL argument. For an options-object-first call (`request({ url, ... }, cb)`),
@@ -423,5 +434,7 @@ function pickUrlArg(call: CallExpression): Node | undefined {
       }
     }
   }
-  return args.find((a) => a.getKind() !== SyntaxKind.ObjectLiteralExpression)
+  // Never a callback. Same predicate the options picker uses, so the two agree about which
+  // argument is which rather than drifting apart.
+  return args.find((a) => a.getKind() !== SyntaxKind.ObjectLiteralExpression && !isCallbackArg(a))
 }
