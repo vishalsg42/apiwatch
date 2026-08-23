@@ -84,6 +84,35 @@ describe.skipIf(!existsSync(distCli))('packed artifact behaviour', () => {
     expect(model.callSiteCount).toBe(1)
   })
 
+  // The spread false positive was the widest-reaching defect in 0.3.5 and it lives entirely in
+  // option resolution, so prove it through the shipped binary rather than only through src/.
+  it('does not report a timeout absent behind an opaque spread', () => {
+    const { model } = audit(fixture('spread-config'))
+    const lines = model.findings
+      .filter((f: { rule: string; file: string }) => f.rule === 'no-timeout')
+      .map((f: { file: string }) => f.file)
+    expect(lines).not.toContain('src/axios-spread-only.ts')
+    // The twin must still fire, or this passes for the wrong reason: an analyser that abstained
+    // everywhere would satisfy the assertion above.
+    expect(lines).toContain('src/axios-empty-object.ts')
+  })
+
+  it('reports a missing timeout on the callback overload, and keeps the verb', () => {
+    const { model } = audit(fixture('method-matrix'))
+    const nt = model.findings.filter((f: { rule: string }) => f.rule === 'no-timeout')
+    expect(nt.map((f: { file: string }) => f.file)).toContain('src/nhs-namespace-url-callback.js')
+    const post = nt.find((f: { file: string }) =>
+      f.file.endsWith('rp-cjs-destructured-post-opts-absent.js'),
+    )
+    expect(post?.evidence).toContain('request-promise.post')
+    // A POST is not idempotent, so no-retry must stay silent on it.
+    const retries = model.findings.filter(
+      (f: { rule: string; file: string }) =>
+        f.rule === 'no-retry' && f.file.endsWith('rp-cjs-destructured-post-opts-absent.js'),
+    )
+    expect(retries).toHaveLength(0)
+  })
+
   it('completes a baseline round trip that can return to green', () => {
     const dir = tmpDir()
     writeFileSync(
