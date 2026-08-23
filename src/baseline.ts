@@ -167,6 +167,15 @@ export function readBaseline(path: string, expect?: BaselineOptions): Baseline {
       `baseline fingerprintVersion ${b.fingerprintVersion} does not match this apiwatch (${FP_VERSION}); regenerate it with \`apiwatch baseline\``,
     )
   if (!Array.isArray(b.accepted)) throw new BaselineError('baseline is malformed: no accepted[]')
+  // `count` is load-bearing arithmetic now that accept takes a max and prune takes a min, not
+  // just a number carried along for display. A hand-edited 0, -1, 1.5 or "2" would silently
+  // change what audit compares against, so reject it here rather than compute with it.
+  for (const e of b.accepted) {
+    if (!Number.isInteger(e?.count) || e.count < 1)
+      throw new BaselineError(
+        `baseline entry ${e?.rule}:${e?.fp} has an invalid count (${JSON.stringify(e?.count)}); counts must be positive integers`,
+      )
+  }
   if (expect && b.options?.root !== expect.root)
     throw new BaselineError(
       `baseline was recorded against root "${b.options?.root}" but this run used "${expect.root}"; fingerprints include the root-relative path, so they are not comparable`,

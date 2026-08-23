@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   type Baseline,
+  type BaselineEntry,
   entryKey,
   readBaseline,
   relativeRoot,
@@ -202,22 +203,68 @@ async function runBaseline(argv: string[], io: CliIo): Promise<number> {
     const existingByKey = new Map(existing.accepted.map((e) => [entryKey(e), e]))
 
     if (sub === 'prune') {
-      const kept = existing.accepted.filter((e) => currentByKey.has(entryKey(e)))
-      const dropped = existing.accepted.length - kept.length
+      // min(existing, current), never max: prune may only lower a count to what this run
+      // actually produced. Raising one would be a silent `accept`, and the whole safety
+      // argument for prune is that it can never turn a red audit green.
+      const kept: BaselineEntry[] = []
+      let prunedOccurrences = 0
+      let droppedEntries = 0
+      for (const e of existing.accepted) {
+        const cur = currentByKey.get(entryKey(e))
+        if (!cur) {
+          // Key absent entirely. This is where a 2-to-0 disappearance lands, which is why
+          // there is no separate "drop zero" branch: toEntries never emits a zero count.
+          prunedOccurrences += e.count
+          droppedEntries += 1
+          continue
+        }
+        const count = Math.min(e.count, cur.count)
+        prunedOccurrences += e.count - count
+        kept.push(count === e.count ? e : { ...e, count })
+      }
       writeEntries(out, kept, version(), options)
-      io.write(`apiwatch: pruned ${dropped} resolved entr(y/ies), ${kept.length} remain\n`)
+      io.write(
+        `apiwatch: pruned ${prunedOccurrences} occurrence(s), dropping ${droppedEntries} entr(y/ies); ${kept.length} entr(y/ies) remain\n`,
+      )
       return 0
     }
 
-    // accept: add only what is genuinely new, and say exactly what is being accepted.
-    const added = current.filter((e) => !existingByKey.has(entryKey(e)))
-    if (added.length === 0) {
+    // accept: max(existing, current), never min, so accepting can never quietly drop a
+    // finding the current run no longer produces. Occurrences, not entries, are what audit
+    // compares, so a second `no-timeout` at an already accepted call site is a real change
+    // and must be both reported and written.
+    const next: BaselineEntry[] = []
+    let addedOccurrences = 0
+    let newEntries = 0
+    let bumpedEntries = 0
+    for (const e of existing.accepted) {
+      const cur = currentByKey.get(entryKey(e))
+      const count = cur ? Math.max(e.count, cur.count) : e.count
+      if (count !== e.count) {
+        addedOccurrences += count - e.count
+        bumpedEntries += 1
+        io.write(`  accepting ${count - e.count} more ${e.rule}  ${e.file}  ${e.excerpt}\n`)
+      }
+      next.push(count === e.count ? e : { ...e, count })
+    }
+    for (const e of current) {
+      if (existingByKey.has(entryKey(e))) continue
+      addedOccurrences += e.count
+      newEntries += 1
+      io.write(`  accepting ${e.rule}  ${e.file}  ${e.excerpt}\n`)
+      next.push(e)
+    }
+    // Safe to return without writing ONLY because zero new occurrences means `next` is
+    // element-for-element `existing.accepted`. The old early return keyed on new KEYS, so a
+    // count bump was computed and then thrown away.
+    if (addedOccurrences === 0) {
       io.write('apiwatch: nothing new to accept\n')
       return 0
     }
-    for (const e of added) io.write(`  accepting ${e.rule}  ${e.file}  ${e.excerpt}\n`)
-    writeEntries(out, [...existing.accepted, ...added], version(), options)
-    io.write(`apiwatch: accepted ${added.length} new finding(s)\n`)
+    writeEntries(out, next, version(), options)
+    io.write(
+      `apiwatch: accepted ${addedOccurrences} occurrence(s) across ${newEntries} new entr(y/ies) and ${bumpedEntries} existing one(s)\n`,
+    )
     return 0
   } catch (err) {
     io.write(`apiwatch: ${err instanceof Error ? err.message : String(err)}\n`)
