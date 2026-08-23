@@ -1,6 +1,6 @@
 {
   "name": "apiwatch",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Zero-config static audit of outbound third-party HTTP calls in a Node/TypeScript repo: no timeout, no retry, no response validation, one AST pass, no code runs.",
   "license": "MIT",
