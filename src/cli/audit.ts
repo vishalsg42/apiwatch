@@ -23,10 +23,6 @@ export type AuditOptions = {
   baseline?: Baseline
   /** Audit sample code, benchmarks and docs alongside shipped code. Off by default. */
   includeNonShipping?: boolean
-  // v0.2 will run a target command (e.g. `npm run dev`) to resolve hosts that come from
-  // runtime config; unused in v0.1 but the option is declared now so the signature never
-  // needs to change once that lands.
-  command?: string[]
 }
 
 export async function runAudit(

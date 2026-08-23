@@ -47,8 +47,8 @@ export function renderMarkdown(m: ReportModel): string {
 
   if (m.unresolvedHostCount > 0)
     L.push(
-      `hosts unresolved for ${m.unresolvedHostCount} call sites (urls come from config); ` +
-        '`apiwatch audit -- npm run dev` (planned for v0.2)',
+      `hosts unresolved for ${m.unresolvedHostCount} call sites ` +
+        '(urls are built at runtime, so static analysis cannot see them)',
       '',
     )
 

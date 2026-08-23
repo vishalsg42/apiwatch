@@ -40,12 +40,12 @@ Nothing here is wrong syntactically. It ships, it works in staging, and it takes
 
 ## After
 
-Real output against [Outline](https://github.com/outline/outline) (v1.9.1, commit `d77dcdf`), a
-self-hosted knowledge base. Nothing here is anonymised, so you can check every line yourself:
+Real output against [Outline](https://github.com/outline/outline) v1.9.1, a self-hosted knowledge
+base. Nothing is anonymised, so every line is checkable:
 
 ```
-git clone --depth 1 https://github.com/outline/outline
-npx apiwatch audit --root outline
+git clone --depth 1 --branch v1.9.1 https://github.com/outline/outline
+npx apiwatch audit --root outline | cat
 ```
 
 ```
@@ -64,22 +64,36 @@ npx apiwatch audit --root outline
   shared/editor/nodes/Image.tsx:90  fetch call sets no timeout, so it has no deadline of its own
   shared/editor/plugins/UploadPlugin.ts:112  fetch call sets no timeout, so it has no deadline of its own
   app/components/Lightbox.tsx:663  no retry policy detected: confirm that failing fast is intentional here
+  server/utils/fetch.ts:167  no retry policy detected: confirm that failing fast is intentional here
+  shared/editor/lib/FileHelper.ts:56  no retry policy detected: confirm that failing fast is intentional here
+  shared/editor/lib/FileHelper.ts:385  no retry policy detected: confirm that failing fast is intentional here
+  shared/editor/nodes/Image.tsx:90  no retry policy detected: confirm that failing fast is intentional here
+  shared/editor/plugins/UploadPlugin.ts:112  no retry policy detected: confirm that failing fast is intentional here
+  server/utils/fetch.ts:167  `node-fetch@2` is superseded by the global fetch in Node >= 18
+  shared/editor/lib/FileHelper.ts:56  no schema validation seen for this response
+  shared/editor/lib/FileHelper.ts:385  no schema validation seen for this response
+
+  hosts unresolved for 8 call sites (urls are built at runtime, so static analysis cannot see them)
 ```
 
 **Eight call sites in a 2144-file codebase is the interesting number.** Outline routes its
 server-side HTTP through one wrapper, `server/utils/fetch.ts`, which adds SSRF filtering, proxy
-support and an optional timeout. Eleven files import it. apiwatch reports none of those calls,
-because a call into a local wrapper is not a call it can judge: the wrapper takes a `timeout`
-option, so whether a given caller is protected is not visible at the call site.
+support and an optional timeout. Eleven files import it, and apiwatch reports none of those
+eleven callers: a call into a local wrapper is not a call it can judge, because whether any given
+caller passes a timeout is not visible at the call site.
 
-That silence is the point. An earlier version read that wrapper as native `fetch` and reported
-32 call sites with 24 `no-timeout` findings against code it had no business flagging. Three
-quarters were wrong. A tool that cannot tell a wrapper from the global is not conservative, it
-is loud.
+That silence is the point. An earlier version read that wrapper as native `fetch` and reported 32
+call sites with 24 `no-timeout` findings against code it had no business flagging. Three quarters
+were wrong. A tool that cannot tell a wrapper from the global is not conservative, it is loud.
 
-What survives is genuinely unwrapped: mostly browser-side (`Lightbox`, `Image`, `FileHelper`),
-where a missing timeout matters less than on a server, plus one server-side call in the Notion
-plugin. Read that as a well-run codebase with little to fix, not as a demonstration of carnage.
+What it does report is the wrapper's own internals (`server/utils/fetch.ts:167`, which uses
+`node-fetch@2` and sets no retry) and the calls that genuinely bypass it. Most of those are
+browser-side (`Lightbox`, `Image`, `FileHelper`, `UploadPlugin`), where a missing deadline
+matters less than on a server, plus one server-side call in the Notion plugin. Read that as a
+well-run codebase with little to fix, not as a demonstration of carnage.
+
+Note every host is unresolved: Outline builds its URLs at runtime, which is the normal case and
+why `hardcoded-host` reports nothing here.
 
 ## CI guard
 
@@ -181,13 +195,13 @@ See [`examples/vulnerable-service`](./examples/vulnerable-service) for what it d
 
 Every one of these is a real, measured gap, not a hedge.
 
-- **Static only.** In the measured corpus, roughly 76% of real call sites build their URL at runtime (92 variable, 21 env, 35 literal out of 148), so most hosts report as unresolved. That's expected, not a failure: apiwatch never runs your code, so a value assembled from a runtime config object or template string is opaque to it.
+- **Static only.** Most real call sites build their URL at runtime, so most hosts report as unresolved. That's expected, not a failure: apiwatch never runs your code, so a value assembled from a runtime config object or template string is opaque to it.
 - **`no-timeout` and `no-retry` stay silent when the options object isn't statically readable.** apiwatch only reads an options/config argument that is a literal `{ ... }` at the call site. An options object built elsewhere and passed in as a variable (`axios(config)`), a spread, a conditional expression, or anything else that isn't an object literal, is neither proof of a timeout/retry nor proof of its absence, so both rules abstain rather than guess. This is the common case in real code, not an edge case: reproduced against twilio-node's `axios(config)` at `src/base/RequestClient.ts:73`, where `config` is an identifier that DOES set a timeout and sits inside a retry function, but the pre-0.1.1 release read it as having neither and reported both `no-timeout` (error) and `no-retry` (warn) on correctly-protected code. If you're auditing your own repo and see fewer findings than before, this is likely why: those sites were never actually protected OR unprotected as far as apiwatch could tell, they were unreadable.
 - **Framework-level timeouts are invisible.** A timeout configured at the framework level, rather than at the call or client instance, is not seen. `HttpModule.register({ timeout })` in NestJS is the known case: every call routed through that module is reported `no-timeout` even though it's protected.
 - **Hand-rolled retry loops make `no-retry` abstain, they do not count as retry.** Library-backed retry (`axios-retry`, `p-retry`, `got`'s built-in retry, an explicit `retry`/`retries` option) is proof of retry. A hand-rolled loop is not, but it is proof that absence of retry cannot be shown, so the rule goes quiet rather than warning. A loop qualifies only when all three hold: the call's nearest loop is a counting `for`/`while`/`do`, the call is inside a `try`, and that `try` contains a `continue` owned by that same loop. Pagination advances on the success path and either needs no `continue` or `break`s out on failure, so it keeps being reported. An earlier heuristic asked only "is there a loop ancestor" and read 22 of 93 sites in one repo as retry, silently suppressing every genuine finding; this one was validated against both shapes, abstaining on 47 of 68 sites in a backend that hand-rolls retry in every provider and on 0 of 93 in the pagination-heavy repo that killed its predecessor. The remaining known gap is a retry loop that re-enters without a `continue` (for example one that only sets a flag), which is still reported.
 - **`signal: controller.signal` is treated as protected.** A bare `AbortController` with no timeout ever attached to it is statically indistinguishable from one wired to `setTimeout(() => controller.abort(), ms)` elsewhere in the file, so `no-timeout` can stay silent on a fetch that's only manually cancellable, never time-bounded.
 - **Clients built by a factory function, or injected via DI other than `@nestjs/axios`, may be missed entirely**, a false negative, not a false positive.
-- **`unvalidated-response` stays silent when it can't follow the value.** Absence of a finding is not proof a response is validated. In the measured corpus, 132 of 148 sites were provably unvalidated and 16 were unknown-and-silent.
+- **`unvalidated-response` stays silent when it can't follow the value.** Absence of a finding is not proof a response is validated. Absence of a finding is not proof a response is validated.
 - **Any `.parse()`/`.validate()`-named call in the enclosing function counts as validation**, as long as the file imports a validator library: apiwatch checks the call's own name and receiver, not that the value it's called on is actually the response. A response handed to some other `.parse()`-named call in the same function (not `JSON.parse`/`Date.parse`, which are explicitly excluded) can read as validated when it isn't.
 - **A client shared across CommonJS modules, or required lazily inside a function body, is resolved**, but a client passed around through less direct means (a factory function's return value, a namespace object's property, DI other than `@nestjs/axios`) may still be invisible, the same false-negative gap that already existed for ESM.
 - **In a monorepo, dependency versions are merged across every package, last one walked wins.** `deprecated-client` and `legacy-client` decide from `dependencies`, which `discoverWorkspace` builds by merging every `package.json` it finds in filesystem walk order. With `node-fetch@2` in one package and `@3` in another, the result depends on which was walked last, and it is wrong in both directions: if the `@3` package wins, real `legacy-client` findings are missed entirely; if the `@2` package wins, `legacy-client` is reported against the package that correctly uses `@3`. Verified on a two-package fixture, where moving `@2` from `packages/aaa` to `packages/zzz` changed the result from no findings to two. Because walk order is filesystem-dependent, a run on macOS and a run on Linux CI can disagree, which matters most for a committed baseline: entries recorded on one machine can read as stale on the other for no visible reason. Fixing this properly needs per-package dependency resolution. Until then, prefer auditing one package at a time (`--root packages/api`) in a monorepo that mixes major versions of the same client.

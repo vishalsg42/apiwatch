@@ -30,15 +30,18 @@ From the repo root, after `pnpm build`:
 node dist/cli.js audit --root examples/vulnerable-service
 ```
 
-Or, once apiwatch is installed from npm:
+The published npm package ships only `dist/`, so this example is not in the tarball. To run it,
+clone the repo:
 
 ```
-npx apiwatch audit --root examples/vulnerable-service
+git clone https://github.com/vishalsg42/apiwatch
+cd apiwatch && pnpm install && pnpm build
+node dist/cli.js audit --root examples/vulnerable-service
 ```
 
 ## Actual output
 
-This is the real, unedited output of `node dist/cli.js audit --root examples/vulnerable-service`
+This is the output of `node dist/cli.js audit --root examples/vulnerable-service | cat`, in full
 against the code in this directory:
 
 ```
@@ -46,23 +49,22 @@ against the code in this directory:
 
   ✖ no-timeout                2
   ⚠ no-retry                  1
-  ⚠ unvalidated-response      3
-  ⚠ hardcoded-host            3
   ⚠ deprecated-client         1
+  ℹ unvalidated-response      3
+  ℹ hardcoded-host            3
 
-  src/services/inventory.js:4  fetch call has no timeout and can hang indefinitely
-  src/services/legacy-billing.js:6  request call has no timeout and can hang indefinitely
-  src/services/inventory.js:4  no retry or backoff: one transient failure becomes an error
-  src/services/inventory.js:4  response is consumed without schema validation
-  src/services/inventory.js:4  host `api.vendor.example` is hardcoded in source
-  src/services/legacy-billing.js:6  response is consumed without schema validation
+  src/services/inventory.js:4  fetch call sets no timeout, so it has no deadline of its own
+  src/services/legacy-billing.js:6  request call sets no timeout, so it has no deadline of its own
+  src/services/inventory.js:4  no retry policy detected: confirm that failing fast is intentional here
   src/services/legacy-billing.js:6  `request` is unmaintained since 2020
+  src/services/inventory.js:4  no schema validation seen for this response
+  src/services/inventory.js:4  host `api.vendor.example` is hardcoded in source
+  src/services/legacy-billing.js:6  no schema validation seen for this response
   src/services/legacy-billing.js:6  host `api.payments.example` is hardcoded in source
-  src/services/notifications.js:6  response is consumed without schema validation
+  src/services/notifications.js:6  no schema validation seen for this response
   src/services/notifications.js:6  host `api.notifications.example` is hardcoded in source
 
-  hosts unresolved for 1 call sites (urls come from config)
-    → apiwatch audit -- npm run dev   (planned for v0.2)
+  hosts unresolved for 1 call sites (urls are built at runtime, so static analysis cannot see them)
 ```
 
 Four call sites were analysed: `inventory.js`, `legacy-billing.js`, `notifications.js`, and

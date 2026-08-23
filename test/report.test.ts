@@ -25,11 +25,11 @@ describe('reporters', () => {
     expect(o).toContain('src/x.ts:10')
   })
   it('tty prints the hint when hosts are unresolved', () =>
-    expect(renderTty(model())).toMatch(/apiwatch audit -- /))
+    expect(renderTty(model())).toMatch(/hosts unresolved for/))
   it('tty omits the hint when every host is known', () =>
     expect(
       renderTty(model([site({ url: { kind: 'literal', url: 'https://a.dev/x', host: 'a.dev' } })])),
-    ).not.toMatch(/apiwatch audit -- /))
+    ).not.toMatch(/hosts unresolved for/))
   it('tty reports the analysed file count', () =>
     expect(renderTty(model())).toMatch(/analysed 10 of 10 files/))
   it('markdown contains a findings table header', () =>

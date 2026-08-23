@@ -42,7 +42,7 @@ A rule is a pure function:
 ```ts
 export type Rule = {
   name: string
-  severity: 'error' | 'warn'
+  severity: 'error' | 'warn' | 'info'
   check(sites: CallSite[], ws: Workspace): Finding[]
 }
 ```
@@ -63,7 +63,10 @@ a plain `CallSite` object and calls `check()` directly, no parsing involved.
 To add a rule:
 
 1. Write it in `src/rules/index.ts` (or split into its own file and re-export, if it's substantial),
-   following the shape above. Use the `F(...)` helper to build `Finding`s consistently.
+   following the shape above. Use the `F(...)` helper to build `Finding`s consistently. It takes a sixth `fingerprint`
+argument that defaults to the call site's. A rule that fires once per FILE rather than once per
+call must pass `fileFingerprint(rule, file)` instead, or its baseline entry re-keys whenever
+calls in that file are reordered. `deprecatedClient` and `legacyClient` both do this.
 2. Register it in the `rules` array near the bottom of that file, so `runRules` picks it up.
 3. Add a fixture under `test/fixtures/<your-fixture-name>/` (a tiny standalone package with its
    own `package.json` and `src/`), demonstrating the exact call shape your rule should flag or
@@ -124,13 +127,16 @@ be masking a real gap, and look for a measured false-positive rate before adding
 ## Never assume ESM
 
 A large share of real-world code that touches HTTP is CommonJS, and `sf.getImportDeclarations()`
-returns `[]` for a CommonJS file; it only sees ESM `import` statements. In the measured corpus,
-roughly 76% of real-world HTTP-touching files were plain JavaScript, much of it CJS. Any analysis
+returns `[]` for a CommonJS file; it only sees ESM `import` statements. Much real-world code that
+touches HTTP is plain JavaScript, a large share of it CJS. Any analysis
 that needs "what does this file import" (to detect a validator library, a deprecated client, a
 cross-module binding) must go through `collectFileImports` in `src/static/imports.ts`, which
 covers both ESM `import` specifiers and CommonJS `require(...)` calls. Reaching for
-`sf.getImportDeclarations()` directly is a common way to introduce a silent CJS blind spot; several
-of the fixtures under `test/fixtures/` (the `cjs-*` and `ambiguous-cjs` ones) exist specifically to
+`sf.getImportDeclarations()` directly is a common way to introduce a silent CJS blind spot, and it
+has caused two shipped bugs: `@nestjs/axios` was ESM-only, and a destructured
+`const { request } = require('node:http')` bound nothing at all because
+`VariableDeclaration.getName()` returns the pattern source text for a destructuring binding.
+Several of the fixtures under `test/fixtures/` (the `cjs-*` and `ambiguous-cjs` ones) exist to
 catch this regression.
 
 ## Fixtures are excluded from lint and typecheck on purpose
