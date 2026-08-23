@@ -97,10 +97,20 @@ function deriveFromCreate(
   if (!init || init.getKind() !== SyntaxKind.CallExpression) return undefined
   const call = init as CallExpression
   const callee = call.getExpression()
-  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return undefined
-  const pae = callee as PropertyAccessExpression
-  if (pae.getName() !== 'create') return undefined
-  const base = out.get(pae.getExpression().getText())
+  // `<client>.create({...})` and, since a factory export can be bound directly, a BARE
+  // `create({...})` / `defaults({...})` on a binding whose origin is 'factory'. Without the
+  // bare form, `import { create } from 'axios'` derived nothing and every call on the resulting
+  // instance was invisible.
+  let base: ClientBinding | undefined
+  if (callee.getKind() === SyntaxKind.PropertyAccessExpression) {
+    const pae = callee as PropertyAccessExpression
+    if (!FACTORY_METHODS.has(pae.getName())) return undefined
+    base = out.get(pae.getExpression().getText())
+  } else if (callee.getKind() === SyntaxKind.Identifier) {
+    const candidate = out.get(callee.getText())
+    if (candidate?.origin !== 'factory') return undefined
+    base = candidate
+  }
   if (!base) return undefined
 
   const arg0 = call.getArguments()[0]
@@ -131,6 +141,112 @@ function httpServiceBoundElsewhere(sf: SourceFile): boolean {
   return false
 }
 
+/**
+ * Which NAMED exports of a supported module are themselves callable request functions.
+ *
+ * A default or namespace import represents the whole module and is always the client. A named
+ * import is not: 0.3.3 bound every named export as a client to make destructured `require` work,
+ * so `createServer` from `node:http` became an outbound call site reporting `no-timeout` at ERROR
+ * severity. `createServer` is a server.
+ *
+ * Verified against installed packages: axios has no named `axios` export (only `default`); got
+ * does export a named `got` in 12.x and 14.x; node-fetch has no named `fetch`, but the entry is
+ * kept because it costs nothing and covers v2 CJS aliasing plus the common mis-written
+ * `import { fetch } from 'node-fetch'`; request's verb helpers really are destructurable
+ * properties of the exported function.
+ */
+const CLIENT_EXPORTS: Record<ClientKind, Set<string>> = {
+  axios: new Set(['default']),
+  'node:http': new Set(['default', 'request', 'get']),
+  got: new Set(['default', 'got']),
+  'node-fetch': new Set(['default', 'fetch']),
+  request: new Set(['default', 'get', 'post', 'put', 'patch', 'delete', 'del', 'head', 'options']),
+  'request-promise': new Set([
+    'default',
+    'get',
+    'post',
+    'put',
+    'patch',
+    'delete',
+    'del',
+    'head',
+    'options',
+  ]),
+  // HttpService is reached through the DI parameter branch, never as a callable binding.
+  'nestjs-axios': new Set(['default']),
+  fetch: new Set(['default', 'fetch']),
+}
+
+/**
+ * Named exports that BUILD a client rather than being one. These must be bound, not rejected:
+ * excluding them would turn a loud false positive into silence. Measured on 0.3.3,
+ * `import { create } from 'axios'; const api = create({...}); api.get(...)` reported one finding
+ * on the `create()` call (wrong line) while the genuine instance calls were already invisible;
+ * rejecting `create` outright would have reported nothing at all.
+ */
+/** Method names that build a client from an existing binding. */
+const FACTORY_METHODS = new Set(['create', 'extend', 'defaults'])
+
+const CLIENT_FACTORIES: Partial<Record<ClientKind, Set<string>>> = {
+  axios: new Set(['create']),
+  got: new Set(['create', 'extend']),
+  request: new Set(['defaults']),
+  'request-promise': new Set(['defaults']),
+}
+
+/**
+ * The export name a binding element or import specifier actually refers to.
+ *
+ * `getText()` is not safe here: for `const { 'request': quoted } = ...` it returns the name WITH
+ * quotes, and for a computed key it returns the brackets, so an allowlist would reject a
+ * legitimate binding. Verified against ts-morph 28.
+ */
+export function importedName(node: {
+  getPropertyNameNode?: () => Node | undefined
+  getName: () => string
+}): string {
+  const key = node.getPropertyNameNode?.()
+  if (!key) return node.getName()
+  if (key.getKind() === SyntaxKind.StringLiteral)
+    return (key as unknown as { getLiteralValue(): string }).getLiteralValue()
+  return key.getText()
+}
+
+const isClientExport = (kind: ClientKind, name: string) => CLIENT_EXPORTS[kind]?.has(name) ?? false
+const isClientFactory = (kind: ClientKind, name: string) =>
+  CLIENT_FACTORIES[kind]?.has(name) ?? false
+
+/**
+ * Classifies a variable initializer as a require of a whole module or of one named export.
+ *
+ *   require('axios')            -> { specifier: 'axios' }
+ *   require('axios').default    -> { specifier: 'axios', property: 'default' }
+ *   anything else               -> undefined
+ */
+function requireShape(init: Node): { specifier: string; property?: string } | undefined {
+  const asRequire = (n: Node): string | undefined => {
+    if (n.getKind() !== SyntaxKind.CallExpression) return undefined
+    const call = n as CallExpression
+    if (call.getExpression().getText() !== 'require') return undefined
+    const arg = call.getArguments()[0]
+    if (!arg) return undefined
+    const k = arg.getKind()
+    if (k !== SyntaxKind.StringLiteral && k !== SyntaxKind.NoSubstitutionTemplateLiteral)
+      return undefined
+    return (arg as unknown as { getLiteralValue(): string }).getLiteralValue()
+  }
+
+  const whole = asRequire(init)
+  if (whole !== undefined) return { specifier: whole }
+
+  if (init.getKind() === SyntaxKind.PropertyAccessExpression) {
+    const pae = init as PropertyAccessExpression
+    const spec = asRequire(pae.getExpression())
+    if (spec !== undefined) return { specifier: spec, property: pae.getName() }
+  }
+  return undefined
+}
+
 export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   const out = new Map<string, ClientBinding>()
 
@@ -140,8 +256,12 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
     const def = d.getDefaultImport()?.getText()
     if (def) out.set(def, bind(def, kind, 'import'))
     for (const n of d.getNamedImports()) {
-      const local = n.getAliasNode()?.getText() ?? n.getName()
-      out.set(local, bind(local, kind, 'import'))
+      // A type-only specifier never produces a runtime binding.
+      if (n.isTypeOnly() || d.isTypeOnly()) continue
+      const imported = n.getName()
+      const local = n.getAliasNode()?.getText() ?? imported
+      if (isClientFactory(kind, imported)) out.set(local, bind(local, kind, 'factory'))
+      else if (isClientExport(kind, imported)) out.set(local, bind(local, kind, 'import'))
     }
     const ns = d.getNamespaceImport()?.getText()
     if (ns) out.set(ns, bind(ns, kind, 'import'))
@@ -154,10 +274,19 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   for (const v of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
     const init = v.getInitializer()
     if (!init) continue
-    const text = init.getText()
-    const req = /^require\(['"]([^'"]+)['"]\)/.exec(text)
-    if (req && TABLE[req[1]]) {
-      const kind = TABLE[req[1]]
+    // Parse the initializer STRUCTURALLY. A prefix-only regex matched `require('node:http')`
+    // inside `require('node:http').createServer` and bound the whole module, so
+    // `const server = require('node:http').createServer` became an outbound call site.
+    const shape = requireShape(init)
+    if (shape && TABLE[shape.specifier]) {
+      const kind = TABLE[shape.specifier]
+      // `require(spec).name` names a single export and must clear the allowlist.
+      if (shape.property !== undefined) {
+        const local = v.getName()
+        if (isClientFactory(kind, shape.property)) out.set(local, bind(local, kind, 'factory'))
+        else if (isClientExport(kind, shape.property)) out.set(local, bind(local, kind, 'import'))
+        continue
+      }
       const nameNode = v.getNameNode()
       // `const { request } = require('node:http')` is one of the most idiomatic CJS shapes and
       // was completely invisible: VariableDeclaration.getName() returns the PATTERN SOURCE TEXT
@@ -168,7 +297,10 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
       if (nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
         for (const el of (nameNode as ObjectBindingPattern).getElements()) {
           const local = el.getName()
-          if (local) out.set(local, bind(local, kind, 'import'))
+          if (!local) continue
+          const imported = importedName(el)
+          if (isClientFactory(kind, imported)) out.set(local, bind(local, kind, 'factory'))
+          else if (isClientExport(kind, imported)) out.set(local, bind(local, kind, 'import'))
         }
         continue
       }

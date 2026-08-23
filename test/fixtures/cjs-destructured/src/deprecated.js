@@ -1,2 +1,2 @@
-const { defaults } = require('request-promise')
-module.exports = () => defaults({ json: true })
+const { get } = require('request-promise')
+module.exports = () => get({ uri: 'https://x.dev/d' })

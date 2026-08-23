@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { sitesFor } from './helpers.js'
 
 /**
- * One fixture per client per import shape. CONTRIBUTING claims the `cjs-*` fixtures "exist
+ * One fixture per client per import shape.
+ *
+ * Note there is deliberately no `const { got } = require('got')` row: that shape cannot exist.
+ * got 11 is the only CommonJS got and does `module.exports = got` with no `.got` property, and
+ * got 12+ is ESM-only.
+ * CONTRIBUTING claims the `cjs-*` fixtures "exist
  * specifically to catch" the CommonJS blind spot, but they only ever covered axios-shaped flows,
  * which is how two bugs shipped: `@nestjs/axios` was ESM-only, and a destructured
  * `const { request } = require('node:http')` bound nothing at all.
@@ -16,7 +21,6 @@ const SHAPES: [string, string][] = [
   ['axios', 'axios-cjs-destructured.js'],
   ['got', 'got-esm-default.ts'],
   ['got', 'got-cjs-default.js'],
-  ['got', 'got-cjs-destructured.js'],
   ['node:http', 'nodehttp-esm-named.ts'],
   ['node:http', 'nodehttp-cjs-default.js'],
   ['node:http', 'nodehttp-cjs-destructured.js'],

@@ -354,6 +354,10 @@ export function findCallSites(
       b = binding ? clients.get(binding) : undefined
     }
     if (!b) continue
+    // A factory binding builds a client; calling it makes no request. `create({...})` and
+    // `defaults({...})` must never be call sites, or 0.3.3's behaviour returns: a finding on the
+    // factory line instead of on the calls that actually go out.
+    if (b.origin === 'factory') continue
     // A property-access call's method comes from its own name (`.post()`). A bare call
     // (`axios({ method: 'post', ... })`, `fetch(url, { method: 'POST' })`) carries it in the
     // config object instead: read it from there so a rule that skips idempotent methods

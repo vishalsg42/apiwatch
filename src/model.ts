@@ -39,7 +39,13 @@ export type CallOptions = {
 export type ClientBinding = {
   name: string // local binding name
   kind: ClientKind
-  origin: 'import' | 'derived' // derived = created by `<client>.create(...)`
+  /**
+   * `import`  a client bound directly from a module
+   * `derived` created by `<client>.create(...)` or a bare factory call
+   * `factory`  the factory itself (`create`, `defaults`). Bound so an instance can derive from
+   *            it, but never itself a call site: `create({...})` makes no request.
+   */
+  origin: 'import' | 'derived' | 'factory'
   instanceTimeout: boolean // the create() call set a timeout
   instanceRetry: boolean // axios-retry / retry config bound to this instance
   exportedAs?: string // set when the binding is exported, for cross-module use

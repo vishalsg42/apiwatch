@@ -1,7 +1,7 @@
 import { dirname, resolve } from 'node:path'
 import { type ObjectBindingPattern, type Project, type SourceFile, SyntaxKind } from 'ts-morph'
 import type { ClientBinding } from '../model.js'
-import { detectClients } from './clients.js'
+import { detectClients, importedName } from './clients.js'
 
 const key = (file: string, name: string) => `${file}#${name}`
 const stripExt = (p: string) => p.replace(/\.(m|c)?[jt]sx?$/, '')
@@ -55,8 +55,12 @@ export function resolveClients(sf: SourceFile, reg: Map<string, ClientBinding>) 
     const target = stripExt(resolve(dir, m[1]))
     const nameNode = v.getNameNode()
     if (nameNode.getKind() !== SyntaxKind.ObjectBindingPattern) continue
+    // importedName, not getPropertyNameNode()?.getText(): for a quoted key
+    // (`const { 'api': client } = require('./http')`) getText() returns "'api'" WITH the
+    // quotes, which can never match an exported name, so the cross-module binding was lost
+    // silently. Same latent bug as the one fixed in detectClients.
     for (const el of (nameNode as ObjectBindingPattern).getElements())
-      apply(local, reg, target, el.getPropertyNameNode()?.getText() ?? el.getName(), el.getName())
+      apply(local, reg, target, importedName(el), el.getName())
   }
 
   return local
