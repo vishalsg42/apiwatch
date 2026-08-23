@@ -111,6 +111,16 @@ export type CorpusStats = {
   // unprotected, just unreadable. Reported separately so the corpus dataset can state honestly
   // how many sites fall in this bucket instead of folding them into "protected" or "unprotected".
   unreadable: number
+  /** Files under example/benchmark/doc directories that were excluded from analysis entirely. */
+  nonShippingFilesExcluded: number
+  /**
+   * Findings whose file sits under a script, tooling or example-ish path. `scripts/`, `tools/`
+   * and `bin/` are deliberately IN scope for an audit (a release script that fetches with no
+   * timeout really does hang CI), but for an ECOSYSTEM statistic they are contamination: nobody
+   * is paged because a build script lacks a deadline. Recorded so the corpus can state what
+   * share of its findings sit in shipped code rather than quietly implying all of them do.
+   */
+  findingsOutsideShippedCode: number
   byRule: Record<string, number>
 }
 

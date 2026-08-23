@@ -30,6 +30,8 @@ export async function scanCorpus(repoDirs: string[], opts: ScanOptions = {}): Pr
     withRetry: 0,
     withValidation: 0,
     unreadable: 0,
+    nonShippingFilesExcluded: 0,
+    findingsOutsideShippedCode: 0,
     byRule: {},
   }
 
@@ -58,6 +60,16 @@ export async function scanCorpus(repoDirs: string[], opts: ScanOptions = {}): Pr
       ).length
       stats.withRetry += sites.filter((s) => s.options.retry === 'library').length
       stats.withValidation += sites.filter((s) => s.options.validated === true).length
+      stats.nonShippingFilesExcluded += model.nonShippingFilesExcluded
+      // Directory-name heuristic, deliberately broader than the audit's own exclusion: this is
+      // for honesty about an ecosystem statistic, not for deciding what to report to a user.
+      // Substring-matched so `extra/push-examples/` is caught, which the audit's exact-segment
+      // rule misses.
+      stats.findingsOutsideShippedCode += model.findings.filter((f) =>
+        /(^|\/)(scripts?|tools?|tooling|bin|extra|[^/]*examples?|[^/]*samples?|demos?|benchmarks?|docs?|website|fixtures?|__mocks__|e2e|cypress)(\/|$)/.test(
+          `/${f.file}`,
+        ),
+      ).length
       stats.unreadable += sites.filter(
         (s) => s.options.timeoutMs === 'unknown' || s.options.retry === 'unknown',
       ).length
@@ -93,6 +105,8 @@ function mergeStats(into: CorpusStats, from: CorpusStats): void {
   into.withRetry += from.withRetry
   into.withValidation += from.withValidation
   into.unreadable += from.unreadable
+  into.nonShippingFilesExcluded += from.nonShippingFilesExcluded
+  into.findingsOutsideShippedCode += from.findingsOutsideShippedCode
   for (const [rule, count] of Object.entries(from.byRule))
     into.byRule[rule] = (into.byRule[rule] ?? 0) + count
 }
@@ -152,6 +166,8 @@ async function main() {
       withRetry: 0,
       withValidation: 0,
       unreadable: 0,
+      nonShippingFilesExcluded: 0,
+      findingsOutsideShippedCode: 0,
       byRule: {},
     }
 
