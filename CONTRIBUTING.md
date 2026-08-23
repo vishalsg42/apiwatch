@@ -1,5 +1,22 @@
 # Contributing to apiwatch
 
+Please also read the [code of conduct](CODE_OF_CONDUCT.md). Security reports go through
+[private advisories](https://github.com/vishalsg42/apiwatch/security/advisories/new), not the
+public tracker; see [SECURITY.md](SECURITY.md).
+
+## Reporting a problem
+
+The most valuable reports are about rules being wrong, in either direction:
+
+- **False positive**: a finding on code that is actually protected
+- **False negative**: silence on a call that really is unprotected
+
+Both have issue templates. Bring the smallest code shape that reproduces it and the JSON output
+from `npx apiwatch audit --root . --json`. A reproduction settles an argument that assertions
+cannot, and several rules in this project were narrowed because someone provided one.
+
+Check the README's Limitations section first. Some silences are deliberate, and it says which.
+
 ## Dev setup
 
 ```

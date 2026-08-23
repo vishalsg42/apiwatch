@@ -1,0 +1,24 @@
+name: Bug
+description: apiwatch crashed, hung, or behaved wrongly in a way that is not about a rule
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the exact command and any error output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: apiwatch and Node versions
+      placeholder: "apiwatch 0.3.2, node 22.11.0"
+    validations:
+      required: true

@@ -1,0 +1,46 @@
+name: False positive
+description: apiwatch reported a finding on code that is actually protected
+labels: [false-positive]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These are the most valuable reports this project gets. Several rules have been narrowed
+        or reclassified because someone showed a finding was wrong.
+
+        Before filing, please check the Limitations section of the README. Some silences and
+        some warnings are deliberate, and it says which.
+  - type: textarea
+    id: code
+    attributes:
+      label: The code apiwatch flagged
+      description: >
+        The smallest snippet that still reproduces it. Include the imports, since how the client
+        is imported decides how it is resolved.
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: reported
+    attributes:
+      label: What apiwatch reported
+      description: Output of `npx apiwatch audit --root . --json`, trimmed to the relevant finding.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this call is actually protected
+      description: >
+        Where the timeout, retry or validation comes from. If it is set somewhere other than the
+        call site, say where, since that is usually the part apiwatch could not see.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: apiwatch version
+      placeholder: "0.3.2"
+    validations:
+      required: true

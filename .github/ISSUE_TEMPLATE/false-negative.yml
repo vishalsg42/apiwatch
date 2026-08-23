@@ -1,0 +1,33 @@
+name: False negative
+description: apiwatch stayed silent on a call that really is unprotected
+labels: [false-negative]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A silence is harder to notice than a wrong warning, so these matter.
+
+        Note that apiwatch abstains on purpose when it cannot prove a finding: an options object
+        it cannot read statically, a hand-rolled retry loop, a client built by a factory. The
+        README's Limitations section lists the known cases. If yours is one of them, a report is
+        still useful, but say so.
+  - type: textarea
+    id: code
+    attributes:
+      label: The code that should have been flagged
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Which rule should have fired, and why
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: apiwatch version
+      placeholder: "0.3.2"
+    validations:
+      required: true
