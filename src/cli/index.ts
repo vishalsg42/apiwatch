@@ -2,18 +2,34 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import {
+  entryKey,
+  readBaseline,
+  relativeRoot,
+  toEntries,
+  writeBaseline,
+  writeEntries,
+} from '../baseline.js'
 import type { CliIo } from '../model.js'
 import { runAudit } from './audit.js'
 
 const USAGE = `apiwatch: audit outbound HTTP calls
 
   apiwatch audit [--root <dir>] [--json] [--fail-on error|warn]
-                 [--include-non-shipping]
+                 [--include-non-shipping] [--baseline <file>]
 
+  apiwatch baseline        [--root <dir>] [--out <file>]   record current findings
+  apiwatch baseline prune  [--root <dir>] [--out <file>]   drop entries that no longer match
+  apiwatch baseline accept [--root <dir>] [--out <file>]   add findings that are currently new
+
+  --baseline <file>       report only findings absent from the baseline
+  --out <file>            baseline path (default .apiwatch-baseline.json)
   --include-non-shipping  also audit example/, benchmark/, docs/ and similar
                           directories, which are skipped by default
   --write-report          write .apiwatch/audit.md; without it the audit only
                           reads, leaving the audited repo untouched
+  --allow-partial         write a baseline even though some files failed to analyse
+
 `
 const version = () => {
   // dist/cli.js (built) sits one level below repo root; src/cli/index.ts (dev/test,
@@ -130,6 +146,84 @@ export function parseAuditArgs(
   }
 }
 
+/**
+ * `baseline`, `baseline prune` and `baseline accept`.
+ *
+ * These are three commands, not one, on purpose. A single `update` that both prunes stale
+ * entries and accepts new findings is a footgun: the natural time to run it is right after CI
+ * fails, which is exactly when accepting everything currently visible is wrong.
+ */
+async function runBaseline(argv: string[], io: CliIo): Promise<number> {
+  const sub = argv[1] === 'prune' || argv[1] === 'accept' ? argv[1] : undefined
+  const parsed = parseAuditArgs(argv.slice(sub ? 2 : 1), io, ['--allow-partial'], ['--out'])
+  if (!parsed.ok) return parsed.code
+  const { root, includeNonShipping } = parsed.args
+  const rest = argv.slice(sub ? 2 : 1)
+  const outIdx = rest.indexOf('--out')
+  const out = outIdx === -1 ? resolve('.apiwatch-baseline.json') : resolve(rest[outIdx + 1])
+  const allowPartial = rest.includes('--allow-partial')
+
+  const result = await runAudit({ root, json: true, includeNonShipping })
+  // Stored relative to the baseline file so the value is portable between a laptop and CI.
+  const options = { root: relativeRoot(out, root), includeNonShipping }
+
+  // Fail closed. A baseline written from a partial analysis quietly omits findings, and the
+  // whole point of the file is that what is not in it is new.
+  if (result.model.filesAnalysed === 0) {
+    io.write(`apiwatch: no source files found under ${root}; refusing to write a baseline\n`)
+    return 2
+  }
+  if (result.model.filesSkipped > 0 && !allowPartial) {
+    io.write(
+      `apiwatch: ${result.model.filesSkipped} file(s) could not be analysed; refusing to write a baseline from a partial run (use --allow-partial to override)\n`,
+    )
+    return 2
+  }
+
+  try {
+    if (sub === undefined) {
+      // Refuse to clobber: regenerating from scratch means "accept everything visible", which
+      // is never what someone wants by accident.
+      if (existsSync(out)) {
+        io.write(
+          `apiwatch: ${out} already exists; use \`apiwatch baseline accept\` to add new findings or \`apiwatch baseline prune\` to drop resolved ones\n`,
+        )
+        return 2
+      }
+      const b = writeBaseline(out, result.model.findings, version(), options)
+      io.write(`apiwatch: wrote ${b.accepted.length} accepted finding(s) to ${out}\n`)
+      return 0
+    }
+
+    const existing = readBaseline(out, options)
+    const current = toEntries(result.model.findings)
+    const currentByKey = new Map(current.map((e) => [entryKey(e), e]))
+    const existingByKey = new Map(existing.accepted.map((e) => [entryKey(e), e]))
+
+    if (sub === 'prune') {
+      const kept = existing.accepted.filter((e) => currentByKey.has(entryKey(e)))
+      const dropped = existing.accepted.length - kept.length
+      writeEntries(out, kept, version(), options)
+      io.write(`apiwatch: pruned ${dropped} resolved entr(y/ies), ${kept.length} remain\n`)
+      return 0
+    }
+
+    // accept: add only what is genuinely new, and say exactly what is being accepted.
+    const added = current.filter((e) => !existingByKey.has(entryKey(e)))
+    if (added.length === 0) {
+      io.write('apiwatch: nothing new to accept\n')
+      return 0
+    }
+    for (const e of added) io.write(`  accepting ${e.rule}  ${e.file}  ${e.excerpt}\n`)
+    writeEntries(out, [...existing.accepted, ...added], version(), options)
+    io.write(`apiwatch: accepted ${added.length} new finding(s)\n`)
+    return 0
+  } catch (err) {
+    io.write(`apiwatch: ${err instanceof Error ? err.message : String(err)}\n`)
+    return 2
+  }
+}
+
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
   if (argv.includes('--version')) {
     io.write(`${version()}\n`)
@@ -139,6 +233,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     io.write(USAGE)
     return 0
   }
+  if (argv[0] === 'baseline') return runBaseline(argv, io)
   if (argv[0] === 'audit') {
     const parsed = parseAuditArgs(argv.slice(1), io)
     if (!parsed.ok) return parsed.code
