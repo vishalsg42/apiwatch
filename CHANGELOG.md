@@ -11,6 +11,12 @@ indistinguishable from a regression.
 
 **Expect more findings on CommonJS codebases.** Three import shapes were silently invisible.
 
+**If you have a committed baseline and your code uses CommonJS, this release will fail your
+build.** Previously invisible call sites become findings, so the baseline does not cover them.
+That is the fix working. Run `apiwatch baseline accept` to take them on, after reviewing what it
+prints. The README's workflow now pins an exact version so this cannot happen on a bump you did
+not make.
+
 - **Destructured `require` bound no client at all.** `VariableDeclaration.getName()` returns the
   pattern source text for a destructuring binding (`"{ request }"`), which can never match a call
   site, so `const { request } = require('node:http')`, `const { got } = require('got')` and

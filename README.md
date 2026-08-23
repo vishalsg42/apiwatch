@@ -116,7 +116,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: npx apiwatch@0.3 audit --baseline .apiwatch-baseline.json --fail-on error
+      # Pinned to an exact version on purpose. apiwatch is pre-1.0 and a patch release can
+      # legitimately ADD findings (0.3.3 made three CommonJS import shapes visible), which
+      # would fail your build on a version bump you never made. Upgrade deliberately, and run
+      # `apiwatch baseline accept` if the new findings are ones you are accepting.
+      - run: npx apiwatch@0.3.3 audit --baseline .apiwatch-baseline.json --fail-on error
 ```
 
 The baseline survives ordinary work: inserting lines, reformatting, reordering calls, renaming a
@@ -135,6 +139,13 @@ after CI fails, which is exactly when accepting everything currently visible is 
 
 **Fixing a finding never fails the build.** Its baseline entry becomes "resolved" and is
 reported, not enforced. A gate that punishes fixing things gets switched off.
+
+**Upgrading apiwatch can add findings.** A release that fixes a blind spot makes previously
+invisible calls visible, so a committed baseline will not cover them and CI goes red on a version
+bump. That is the fix working, not a regression. Pin the version in your workflow, upgrade
+deliberately, and run `apiwatch baseline accept` to take on the newly visible findings. 0.3.3 is
+the current example: it made three CommonJS import shapes visible, and one real backend went from
+93 to 110 call sites.
 
 ## Measuring a corpus
 
