@@ -84,9 +84,45 @@ What the report does **not** say matters as much as what it does. In that same f
 Twenty-four `no-timeout` findings across fourteen files is a morning's work, not a wall of
 noise.
 
-Across a separate corpus of five production services, the tool measured **148 outbound call
-sites: 13 with a timeout (8.8%), 0 with retry (0.0%), 0 validating the response.** Outline is
-not a cherry-picked repo; this is the default state of hand-rolled HTTP calls in real backends.
+## The corpus
+
+Outline is not a cherry-picked repo. apiwatch was run across **100 public Node repositories** to
+check whether that result is typical. `scripts/scan-corpus.ts` reproduces the run; it reports
+aggregates only and keeps no per-repo identity.
+
+| | applications and frameworks | libraries, SDKs and CLIs | all |
+|---|---:|---:|---:|
+| repos | 71 | 29 | 100 |
+| call sites found | 1988 | 296 | 2284 |
+| not statically readable | 292 (14.7%) | 24 (8.1%) | 316 (13.8%) |
+| **readable call sites** | **1696** | **272** | **1968** |
+| set a timeout | 11.8% | 2.2% | **10.5%** |
+| retry | 0.4% | 1.8% | 0.6% |
+| validate the response | 1.9% | 0.0% | 1.6% |
+
+**Of the 1968 outbound call sites apiwatch could read, 10.5% set a timeout, 0.6% retry and 1.6%
+validate the response.** A separate corpus of five private production services measured 148 call
+sites at 8.8% / 0.0% / 0.0%. Two disjoint corpora, the same answer: roughly nine in ten outbound
+HTTP calls in real Node code have nothing stopping them hanging.
+
+Read the percentages as "of the call sites apiwatch could read", never "of all outbound calls".
+The 13.8% it could not read are neither protected nor unprotected as far as static analysis can
+tell, and counting them either way would be a claim the tool cannot support.
+
+Four more things the numbers do not say on their own:
+
+- **8 of the 100 repos failed** to clone or scan and contribute nothing. They are excluded, not
+  counted as zero.
+- **Three repos were dropped before the run**: `aws-sdk-js-v3`, `google-api-nodejs-client` and
+  `azure-sdk-for-js`, all generated SDK monorepos too large to clone and scan in bounded time.
+  They belong to the category apiwatch reads worst, so their absence makes these figures
+  conservative rather than flattering.
+- **Libraries are the weak spot in both directions.** They set timeouts five times less often
+  (2.2% against 11.8%) and validate nothing at all, but they are also where apiwatch is least
+  useful: more of their findings sit in sample code, and their call sites are the hardest to
+  read. Prefer the application figure and treat the blended number as context.
+- These figures include sample code and benchmarks, because most of the corpus was measured
+  before `--include-non-shipping` existed. Shipped-only totals run roughly 10% lower.
 
 ## Development
 
