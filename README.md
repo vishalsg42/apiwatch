@@ -54,8 +54,8 @@ npx apiwatch audit --root outline
 
   ✖ no-timeout                6
   ⚠ no-retry                  6
-  ⚠ unvalidated-response      2
   ℹ legacy-client             1
+  ℹ unvalidated-response      2
 
   app/components/Lightbox.tsx:663  fetch call sets no timeout, so it has no deadline of its own
   plugins/notion/server/notion.ts:199  fetch call sets no timeout, so it has no deadline of its own
@@ -63,7 +63,7 @@ npx apiwatch audit --root outline
   shared/editor/lib/FileHelper.ts:385  fetch call sets no timeout, so it has no deadline of its own
   shared/editor/nodes/Image.tsx:90  fetch call sets no timeout, so it has no deadline of its own
   shared/editor/plugins/UploadPlugin.ts:112  fetch call sets no timeout, so it has no deadline of its own
-  app/components/Lightbox.tsx:663  no retry or backoff: one transient failure becomes an error
+  app/components/Lightbox.tsx:663  no retry policy detected: confirm that failing fast is intentional here
 ```
 
 **Eight call sites in a 2144-file codebase is the interesting number.** Outline routes its
@@ -129,8 +129,8 @@ See [`examples/vulnerable-service`](./examples/vulnerable-service) for what it d
 | rule | severity | flags |
 |---|---|---|
 | `no-timeout` | error | call has no `timeout` option, no `AbortSignal.timeout()`, and no instance-level default; stays silent when the options object isn't statically readable (an options object passed as a variable, a spread, a conditional, ...), since that's neither proof of a timeout nor proof of its absence |
-| `no-retry` | warn | idempotent call (`get`/`head`/`options`/`put`/`delete`) has no library-backed retry; also flags a call whose method can't be statically determined at all, on the assumption that an unreadable method is safer to warn on than to silently skip; a property-access `.options()` call is never tracked as a call site in the first place, so it can only ever be flagged via an explicit `method: 'options'` in a bare call's config object. Like `no-timeout`, it stays silent when the options object itself isn't statically readable |
-| `unvalidated-response` | warn | response body is used without reaching a schema validator (zod/Joi/yup/ajv/class-validator) |
+| `no-retry` | warn | idempotent call (`get`/`head`/`options`/`put`/`delete`) has no library-backed retry; also flags a call whose method can't be statically determined at all, on the assumption that an unreadable method is safer to warn on than to silently skip; a property-access `.options()` call is never tracked as a call site in the first place, so it can only ever be flagged via an explicit `method: 'options'` in a bare call's config object. Like `no-timeout`, it stays silent when the options object itself isn't statically readable. Phrased as a review prompt, not a defect: failing fast is often correct, and apiwatch can see that no retry is configured but not whether that was a decision |
+| `unvalidated-response` | info | no schema validator (zod/Joi/yup/ajv/class-validator) was seen for this response. Info, not warn: it checks whether a validator-shaped call exists in the enclosing function, not whether THIS response reached it, so it cannot gate a build until it follows the value |
 | `deprecated-client` | warn | file imports the unmaintained `request` or `request-promise` packages |
 | `legacy-client` | info | file imports `node-fetch@2`, which the global `fetch` in Node >= 18 supersedes. Not deprecated, just usually removable |
 | `hardcoded-host` | info | a literal, non-loopback host string is embedded in source |

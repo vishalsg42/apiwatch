@@ -70,24 +70,41 @@ export const noRetry: Rule = {
           'no-retry',
           'warn',
           x,
-          'no retry or backoff: one transient failure becomes an error',
+          // A review prompt, not a verdict. Failing fast is frequently the RIGHT call: retrying
+          // can amplify a vendor outage, a latency-sensitive path may prefer to give up, an
+          // internal service may rely on platform-level retries, and PUT/DELETE are idempotent
+          // by spec but not always by implementation. apiwatch can see that no retry policy is
+          // configured; it cannot see whether that was a decision.
+          'no retry policy detected: confirm that failing fast is intentional here',
           `${x.client} ${x.method ?? 'request'} with retry: none`,
         ),
       ),
 }
 
+/**
+ * 'info' on purpose, and it should stay there until the analysis actually follows the response
+ * value. Today this asks whether a validator-shaped call exists anywhere in the enclosing
+ * function, not whether THIS response reached it, so:
+ *
+ * - a validator call for unrelated data suppresses the finding;
+ * - several responses in one function all read as validated when only one is;
+ * - a streamed file, a text body, or a status-only request is reported for lacking a schema.
+ *
+ * That is too loose to gate a build on. It stays visible because the underlying gap is real,
+ * but it cannot fail CI until it can name the value it followed.
+ */
 export const unvalidatedResponse: Rule = {
   name: 'unvalidated-response',
-  severity: 'warn',
+  severity: 'info',
   check: (s) =>
     s
       .filter((x) => x.options.validated === false)
       .map((x) =>
         F(
           'unvalidated-response',
-          'warn',
+          'info',
           x,
-          'response is consumed without schema validation',
+          'no schema validation seen for this response',
           'no zod/Joi/yup/ajv/class-validator call reached this response',
         ),
       ),

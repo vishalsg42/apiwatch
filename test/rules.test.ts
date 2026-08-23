@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { runRules } from '../src/rules/index.js'
+import { rules, runRules } from '../src/rules/index.js'
 import { site, ws } from './helpers.js'
 
 const only = (r: string, sites = [site()], w = ws) => runRules(sites, w).filter((f) => f.rule === r)
@@ -101,4 +101,28 @@ describe('rules', () => {
   })
   it('every finding carries a message and evidence', () =>
     expect(runRules([site()], ws).every((f) => f.message && f.evidence)).toBe(true))
+})
+
+describe('severity discipline', () => {
+  // no-timeout is the only rule allowed to fail a default CI gate. Everything else is either a
+  // review prompt or a note, so a report cannot train people to reach for --fail-on error.
+  it('no-timeout is the only error-severity rule', () => {
+    const errs = rules.filter((r) => r.severity === 'error').map((r) => r.name)
+    expect(errs).toEqual(['no-timeout'])
+  })
+
+  // Reworded from an assertion to a prompt: failing fast is often the right call, and apiwatch
+  // can see that no retry is configured but not whether that was a decision.
+  it('no-retry asks rather than asserts', () => {
+    const f = only('no-retry')[0]
+    expect(f.message).toMatch(/confirm that failing fast is intentional/)
+    expect(f.message).not.toMatch(/becomes an error/)
+  })
+
+  // Until the analysis follows the response value, this must not gate a build.
+  it('unvalidated-response is info, so it cannot fail CI', () => {
+    const o = { timeoutMs: 1, retry: 'library' as const }
+    const f = only('unvalidated-response', [site({ options: { ...o, validated: false } })])[0]
+    expect(f.severity).toBe('info')
+  })
 })
