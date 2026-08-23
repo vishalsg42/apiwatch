@@ -33,7 +33,36 @@ const bind = (
   origin: ClientBinding['origin'],
   instanceTimeout = false,
   instanceRetry = false,
-): ClientBinding => ({ name, kind, origin, instanceTimeout, instanceRetry })
+  boundMethod?: string,
+): ClientBinding => ({ name, kind, origin, instanceTimeout, instanceRetry, boundMethod })
+
+/**
+ * The HTTP verb a named export represents, or undefined when the export is the client itself.
+ *
+ * `request`/`request-promise` expose their verbs as destructurable properties and `node:http`
+ * exposes `request` and `get`, so a named import can BE a method. `default` and `fetch` are the
+ * client, not a verb. `del` normalises to `delete`, matching the property-access path in
+ * callsites.ts, so the two agree on one spelling.
+ *
+ * `options` is included deliberately, and it is the one asymmetry: property-access `.options()`
+ * is excluded from METHODS in callsites.ts (an `.options` property is far more often a config
+ * bag than a request), while a destructured `options` is allowlisted as callable and does become
+ * a call site. Recording the verb here does not change any rule, since 'options' is idempotent;
+ * the underlying disagreement between the two paths is pre-existing and stays documented.
+ */
+const VERBS = new Set([
+  'get',
+  'post',
+  'put',
+  'patch',
+  'delete',
+  'del',
+  'head',
+  'options',
+  'request',
+])
+const verbOf = (imported: string): string | undefined =>
+  VERBS.has(imported) ? (imported === 'del' ? 'delete' : imported) : undefined
 
 const TIMEOUT_PROPS = new Set(['timeout'])
 const RETRY_PROPS = new Set(['retry', 'retries'])
@@ -261,7 +290,8 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
       const imported = n.getName()
       const local = n.getAliasNode()?.getText() ?? imported
       if (isClientFactory(kind, imported)) out.set(local, bind(local, kind, 'factory'))
-      else if (isClientExport(kind, imported)) out.set(local, bind(local, kind, 'import'))
+      else if (isClientExport(kind, imported))
+        out.set(local, bind(local, kind, 'import', false, false, verbOf(imported)))
     }
     const ns = d.getNamespaceImport()?.getText()
     if (ns) out.set(ns, bind(ns, kind, 'import'))
@@ -284,7 +314,8 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
       if (shape.property !== undefined) {
         const local = v.getName()
         if (isClientFactory(kind, shape.property)) out.set(local, bind(local, kind, 'factory'))
-        else if (isClientExport(kind, shape.property)) out.set(local, bind(local, kind, 'import'))
+        else if (isClientExport(kind, shape.property))
+          out.set(local, bind(local, kind, 'import', false, false, verbOf(shape.property)))
         continue
       }
       const nameNode = v.getNameNode()
@@ -300,7 +331,8 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
           if (!local) continue
           const imported = importedName(el)
           if (isClientFactory(kind, imported)) out.set(local, bind(local, kind, 'factory'))
-          else if (isClientExport(kind, imported)) out.set(local, bind(local, kind, 'import'))
+          else if (isClientExport(kind, imported))
+            out.set(local, bind(local, kind, 'import', false, false, verbOf(imported)))
         }
         continue
       }

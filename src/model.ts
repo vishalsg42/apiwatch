@@ -46,6 +46,15 @@ export type ClientBinding = {
    *            it, but never itself a call site: `create({...})` makes no request.
    */
   origin: 'import' | 'derived' | 'factory'
+  /**
+   * The HTTP verb this binding was imported AS, for a named or destructured method import
+   * (`const { get } = require('request-promise')` -> `'get'`). Without it a bare-identifier call
+   * has no method at all: evidence read `request-promise()` with the verb missing, and `no-retry`
+   * fired on a POST because `undefined` counts as idempotent by design. Never set for a
+   * default/namespace import, and never inherited by a `create()`/`defaults()` derived instance,
+   * which is invoked bare.
+   */
+  boundMethod?: string
   instanceTimeout: boolean // the create() call set a timeout
   instanceRetry: boolean // axios-retry / retry config bound to this instance
   exportedAs?: string // set when the binding is exported, for cross-module use

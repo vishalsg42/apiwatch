@@ -362,6 +362,16 @@ export function findCallSites(
     // (`axios({ method: 'post', ... })`, `fetch(url, { method: 'POST' })`) carries it in the
     // config object instead: read it from there so a rule that skips idempotent methods
     // doesn't have to treat "method unreadable" and "method is get/head" as the same thing.
+    // A named or destructured method import (`const { get } = require('request-promise')`) is an
+    // Identifier callee, so the property-access branch above never ran and the verb would be lost:
+    // evidence printed `request-promise()` and no-retry fired on a POST, because `undefined` is
+    // idempotent by design. The binding remembers what it was imported as.
+    //
+    // NOTE: deliberately NOT threaded into options.ts. The three clients with ambiguous overloads
+    // now resolve their config argument by argument SHAPE, so they never consult the method, and
+    // no other client exposes a verb as a named export (see CLIENT_EXPORTS). Adding it there would
+    // be dead code that no test can distinguish.
+    method ??= b.boundMethod
     method ??= configMethod(call, b)
 
     const { line, column } = sf.getLineAndColumnAtPos(call.getStart())
