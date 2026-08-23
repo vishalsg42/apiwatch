@@ -205,13 +205,24 @@ export const rules: Rule[] = [
   hardcodedHost,
 ]
 
+// An explicit rank, not a nested ternary. The previous comparator was written for two
+// severities and returned 1 for BOTH compare(warn, info) and compare(info, warn) once 'info'
+// existed, so it was not antisymmetric and the file/line tiebreak was never reached across
+// those two. Findings are emitted in `rules` array order and unvalidatedResponse (info) is
+// registered before deprecatedClient (warn), so real reports printed info above warn.
+const SEVERITY_RANK: Record<Finding['severity'], number> = { error: 0, warn: 1, info: 2 }
+
+// Code-unit comparison, deliberately not localeCompare: file order must not depend on the
+// machine's locale, since a baseline file is generated on a laptop and checked in CI.
+const byCodeUnit = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+
 export function runRules(sites: CallSite[], ws: Workspace): Finding[] {
   return rules
     .flatMap((r) => r.check(sites, ws))
     .sort(
       (a, b) =>
-        (a.severity === b.severity ? 0 : a.severity === 'error' ? -1 : 1) ||
-        a.file.localeCompare(b.file) ||
+        SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
+        byCodeUnit(a.file, b.file) ||
         a.line - b.line,
     )
 }

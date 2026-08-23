@@ -28,6 +28,108 @@ const version = () => {
   throw new Error('apiwatch: could not locate package.json to resolve version')
 }
 
+/**
+ * Validates the shared audit-style arguments used by `audit` and by the baseline commands.
+ *
+ * This lives outside the command branches on purpose. It began inline inside `audit`, and the
+ * moment a second command needed the same guarantees, copying it would have guaranteed drift.
+ * Every argument is checked before any work happens, because a mistyped path used to produce a
+ * clean, green, zero-finding audit: the single worst outcome for a CI guard, since the build
+ * passes precisely because nothing was examined.
+ */
+export type AuditArgs = {
+  root: string
+  json: boolean
+  failOn?: 'error' | 'warn'
+  includeNonShipping: boolean
+  writeReport: boolean
+}
+
+const BOOL_FLAGS = ['--json', '--include-non-shipping', '--write-report']
+const VALUE_FLAGS = ['--root', '--fail-on']
+
+export function parseAuditArgs(
+  rest: string[],
+  io: CliIo,
+  extraBool: string[] = [],
+  extraValue: string[] = [],
+): { ok: true; args: AuditArgs } | { ok: false; code: number } {
+  const boolFlags = [...BOOL_FLAGS, ...extraBool]
+  const valueFlags = [...VALUE_FLAGS, ...extraValue]
+
+  // Returns the flag's value, or MISSING when the flag is present but its value is absent or is
+  // itself a flag. `--root --json` used to audit a directory literally named "--json"; the
+  // sentinel keeps that distinguishable from "flag not supplied at all".
+  const MISSING = Symbol('missing')
+  const flagValue = (name: string): string | typeof MISSING | undefined => {
+    const i = rest.indexOf(name)
+    if (i === -1) return undefined
+    const v = rest[i + 1]
+    if (v === undefined || v.startsWith('-')) {
+      io.write(`apiwatch: ${name} requires a value\n`)
+      return MISSING
+    }
+    return v
+  }
+
+  let bad = false
+  for (const [i, a] of rest.entries()) {
+    if (!a.startsWith('-')) {
+      // A positional token is only ever the value of the preceding value flag.
+      if (i === 0 || !valueFlags.includes(rest[i - 1])) {
+        io.write(`apiwatch: unexpected argument \`${a}\`\n`)
+        bad = true
+      }
+      continue
+    }
+    if (!boolFlags.includes(a) && !valueFlags.includes(a)) {
+      io.write(`apiwatch: unknown flag \`${a}\`\n`)
+      bad = true
+    }
+  }
+
+  const rootVal = flagValue('--root')
+  if (rootVal === MISSING) bad = true
+  const rootRaw = typeof rootVal === 'string' ? rootVal : undefined
+
+  const failOnVal = flagValue('--fail-on')
+  if (failOnVal === MISSING) bad = true
+  const failOnRaw = typeof failOnVal === 'string' ? failOnVal : undefined
+  if (failOnRaw !== undefined && failOnRaw !== 'error' && failOnRaw !== 'warn') {
+    io.write(`apiwatch: --fail-on must be \`error\` or \`warn\`, got \`${failOnRaw}\`\n`)
+    bad = true
+  }
+  if (bad) {
+    io.write(USAGE)
+    return { ok: false, code: 2 }
+  }
+
+  const root = rootRaw ? resolve(rootRaw) : process.cwd()
+  // An unreadable root is a usage error, not an empty repository.
+  let rootStat: ReturnType<typeof statSync> | undefined
+  try {
+    rootStat = statSync(root)
+  } catch {
+    io.write(`apiwatch: root does not exist: ${root}\n`)
+    return { ok: false, code: 2 }
+  }
+  if (!rootStat.isDirectory()) {
+    io.write(`apiwatch: root is not a directory: ${root}\n`)
+    return { ok: false, code: 2 }
+  }
+
+  return {
+    ok: true,
+    args: {
+      root,
+      json: rest.includes('--json'),
+      failOn: failOnRaw === 'error' || failOnRaw === 'warn' ? failOnRaw : undefined,
+      includeNonShipping: rest.includes('--include-non-shipping'),
+      writeReport: rest.includes('--write-report'),
+    },
+  }
+}
+
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
   if (argv.includes('--version')) {
     io.write(`${version()}\n`)
@@ -38,78 +140,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     return 0
   }
   if (argv[0] === 'audit') {
-    const rest = argv.slice(1)
-    // Every argument is validated before any work happens. A mistyped path used to produce a
-    // clean, green, zero-finding audit, which is the single worst outcome for a CI guard: the
-    // build passes precisely because nothing was examined.
-    const json = rest.includes('--json')
-    const BOOL_FLAGS = ['--json', '--include-non-shipping', '--write-report']
-    const VALUE_FLAGS = ['--root', '--fail-on']
-
-    // Returns the flag's value, or the MISSING sentinel when the flag is present but its value
-    // is absent or is itself a flag. `--root --json` used to audit a directory literally named
-    // "--json"; a sentinel keeps that case distinguishable from "flag not supplied at all".
-    const MISSING = Symbol('missing')
-    const flagValue = (name: string): string | typeof MISSING | undefined => {
-      const i = rest.indexOf(name)
-      if (i === -1) return undefined
-      const v = rest[i + 1]
-      if (v === undefined || v.startsWith('-')) {
-        io.write(`apiwatch: ${name} requires a value\n`)
-        return MISSING
-      }
-      return v
-    }
-
-    let bad = false
-    for (const [i, a] of rest.entries()) {
-      if (!a.startsWith('-')) {
-        // Positional tokens are only ever the value of the preceding value flag.
-        if (i === 0 || !VALUE_FLAGS.includes(rest[i - 1])) {
-          io.write(`apiwatch: unexpected argument \`${a}\`\n`)
-          bad = true
-        }
-        continue
-      }
-      if (!BOOL_FLAGS.includes(a) && !VALUE_FLAGS.includes(a)) {
-        io.write(`apiwatch: unknown flag \`${a}\`\n`)
-        bad = true
-      }
-    }
-
-    const rootVal = flagValue('--root')
-    if (rootVal === MISSING) bad = true
-    const rootRaw = typeof rootVal === 'string' ? rootVal : undefined
-
-    const failOnVal = flagValue('--fail-on')
-    if (failOnVal === MISSING) bad = true
-    const failOnRaw = typeof failOnVal === 'string' ? failOnVal : undefined
-    if (failOnRaw !== undefined && failOnRaw !== 'error' && failOnRaw !== 'warn') {
-      io.write(`apiwatch: --fail-on must be \`error\` or \`warn\`, got \`${failOnRaw}\`\n`)
-      bad = true
-    }
-    if (bad) {
-      io.write(USAGE)
-      return 2
-    }
-
-    const root = rootRaw ? resolve(rootRaw) : process.cwd()
-    // An unreadable root is a usage error, not an empty repository.
-    let rootStat: ReturnType<typeof statSync> | undefined
-    try {
-      rootStat = statSync(root)
-    } catch {
-      io.write(`apiwatch: root does not exist: ${root}\n`)
-      return 2
-    }
-    if (!rootStat.isDirectory()) {
-      io.write(`apiwatch: root is not a directory: ${root}\n`)
-      return 2
-    }
-
-    const failOn = failOnRaw === 'error' || failOnRaw === 'warn' ? failOnRaw : undefined
-    const includeNonShipping = rest.includes('--include-non-shipping')
-    const writeReport = rest.includes('--write-report')
+    const parsed = parseAuditArgs(argv.slice(1), io)
+    if (!parsed.ok) return parsed.code
+    const { root, json, failOn, includeNonShipping, writeReport } = parsed.args
     const result = await runAudit({ root, json, failOn, includeNonShipping, writeReport })
     // Zero source files means the root was wrong, empty, or entirely excluded. Silence there
     // reads as a pass, so say it out loud on stderr without failing the run.
