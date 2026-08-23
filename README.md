@@ -41,88 +41,43 @@ npx apiwatch audit --root outline
 ```
 
 ```
-  analysed 2144 of 2144 files · 32 outbound call sites
+  analysed 2144 of 2144 files · 8 outbound call sites
   skipped 15 files in example/benchmark/doc dirs (--include-non-shipping to audit them)
 
-  ✖ no-timeout               24
-  ⚠ no-retry                 16
-  ⚠ unvalidated-response      6
-  ⚠ hardcoded-host            1
+  ✖ no-timeout                6
+  ⚠ no-retry                  6
   ⚠ deprecated-client         1
+  ⚠ unvalidated-response      2
 
   app/components/Lightbox.tsx:663  fetch call has no timeout and can hang indefinitely
-  plugins/figma/server/figma.ts:66  fetch call has no timeout and can hang indefinitely
-  plugins/figma/server/figma.ts:91  fetch call has no timeout and can hang indefinitely
-  plugins/figma/server/figma.ts:107  fetch call has no timeout and can hang indefinitely
-  plugins/figma/server/figma.ts:155  fetch call has no timeout and can hang indefinitely
-  plugins/gitlab/server/gitlab.ts:336  fetch call has no timeout and can hang indefinitely
+  plugins/notion/server/notion.ts:199  fetch call has no timeout and can hang indefinitely
+  shared/editor/lib/FileHelper.ts:56  fetch call has no timeout and can hang indefinitely
+  shared/editor/nodes/Image.tsx:90  fetch call has no timeout and can hang indefinitely
+  server/utils/fetch.ts:167  `node-fetch@2` is superseded by native fetch
 ```
 
-Most of the findings land where the risk is: `plugins/figma`, `plugins/linear`,
-`plugins/gitlab` and `plugins/slack` are all third-party boundaries, where a slow vendor
-becomes your outage. `figma.ts:66` is an OAuth token exchange with no timeout and no signal:
+**Eight call sites in a 2144-file codebase is the interesting number.** Outline routes its
+server-side HTTP through one wrapper, `server/utils/fetch.ts`, which adds SSRF filtering, proxy
+support and an optional timeout. Eleven files import it. apiwatch reports none of those calls,
+because a call into a local wrapper is not a call it can judge: the wrapper takes a `timeout`
+option, so whether a given caller is protected is not visible at the call site.
 
-```ts
-const res = await fetch(FigmaUtils.tokenUrl, {
-  method: "POST",
-  headers,
-  body,
-});
-```
+That silence is the point. An earlier version read that wrapper as native `fetch` and reported
+32 call sites with 24 `no-timeout` findings against code it had no business flagging. Three
+quarters were wrong. A tool that cannot tell a wrapper from the global is not conservative, it
+is loud.
 
-Node's `fetch` has no default timeout, so if Figma stalls, that call waits forever.
+What survives is genuinely unwrapped: mostly browser-side (`Lightbox`, `Image`, `FileHelper`),
+where a missing timeout matters less than on a server, plus one server-side call in the Notion
+plugin. Read that as a well-run codebase with little to fix, not as a demonstration of carnage.
 
-What the report does **not** say matters as much as what it does. In that same file:
+## Measuring a corpus
 
-- **`no-retry` fired on lines 107 and 155 only**, the two idempotent `GET`s. It skipped the
-  `POST` token exchange and refresh on 66 and 91, because retrying a one-time OAuth code is a
-  correctness bug, not a fix.
-- **`unvalidated-response` fired on none of the four**, because line 78 runs
-  `AccessTokenResponseSchema.parse(await res.json())`. apiwatch found the zod call and stayed
-  quiet.
-
-Twenty-four `no-timeout` findings across fourteen files is a morning's work, not a wall of
-noise.
-
-## The corpus
-
-Outline is not a cherry-picked repo. apiwatch was run across **100 public Node repositories** to
-check whether that result is typical. `scripts/scan-corpus.ts` reproduces the run; it reports
-aggregates only and keeps no per-repo identity.
-
-| | applications and frameworks | libraries, SDKs and CLIs | all |
-|---|---:|---:|---:|
-| repos | 71 | 29 | 100 |
-| call sites found | 1988 | 296 | 2284 |
-| not statically readable | 292 (14.7%) | 24 (8.1%) | 316 (13.8%) |
-| **readable call sites** | **1696** | **272** | **1968** |
-| set a timeout | 11.8% | 2.2% | **10.5%** |
-| retry | 0.4% | 1.8% | 0.6% |
-| validate the response | 1.9% | 0.0% | 1.6% |
-
-**Of the 1968 outbound call sites apiwatch could read, 10.5% set a timeout, 0.6% retry and 1.6%
-validate the response.** A separate corpus of five private production services measured 148 call
-sites at 8.8% / 0.0% / 0.0%. Two disjoint corpora, the same answer: roughly nine in ten outbound
-HTTP calls in real Node code have nothing stopping them hanging.
-
-Read the percentages as "of the call sites apiwatch could read", never "of all outbound calls".
-The 13.8% it could not read are neither protected nor unprotected as far as static analysis can
-tell, and counting them either way would be a claim the tool cannot support.
-
-Four more things the numbers do not say on their own:
-
-- **8 of the 100 repos failed** to clone or scan and contribute nothing. They are excluded, not
-  counted as zero.
-- **Three repos were dropped before the run**: `aws-sdk-js-v3`, `google-api-nodejs-client` and
-  `azure-sdk-for-js`, all generated SDK monorepos too large to clone and scan in bounded time.
-  They belong to the category apiwatch reads worst, so their absence makes these figures
-  conservative rather than flattering.
-- **Libraries are the weak spot in both directions.** They set timeouts five times less often
-  (2.2% against 11.8%) and validate nothing at all, but they are also where apiwatch is least
-  useful: more of their findings sit in sample code, and their call sites are the hardest to
-  read. Prefer the application figure and treat the blended number as context.
-- These figures include sample code and benchmarks, because most of the corpus was measured
-  before `--include-non-shipping` existed. Shipped-only totals run roughly 10% lower.
+`scripts/scan-corpus.ts` runs the audit across many repositories and reports aggregates only,
+keeping no per-repo identity. An earlier 100-repo run is not quoted here: it was measured before
+apiwatch could tell a local `fetch` wrapper from the global, so its totals counted wrapped calls
+as unprotected. The rerun is outstanding, and no ecosystem-wide claim belongs in this README
+until it is done.
 
 ## Development
 
