@@ -122,6 +122,54 @@ export function configMethod(call: CallExpression, binding: ClientBinding): stri
   return raw === 'del' ? 'delete' : raw
 }
 
+// Counting loops only. `for...of` / `for...in` iterate a collection, so a `continue` inside one
+// means "skip this item", never "try that request again"; including them would classify batch
+// loops as retry.
+const RETRY_LOOPS = [SyntaxKind.ForStatement, SyntaxKind.WhileStatement, SyntaxKind.DoStatement]
+
+// Every loop kind, used to find which loop a `continue` or a call actually belongs to. Asking
+// only about counting loops silently skips an enclosing `for...of`: a `continue` that skips a
+// record in an inner `for (const row of data)` was attributed to the outer `while`, which read
+// a textbook pagination loop as retry. Ownership must be decided against the NEAREST loop of
+// any kind.
+const ALL_LOOPS = [...RETRY_LOOPS, SyntaxKind.ForOfStatement, SyntaxKind.ForInStatement]
+
+const nearestLoop = (n: Node): Node | undefined =>
+  n.getAncestors().find((a: Node) => ALL_LOOPS.includes(a.getKind()))
+
+/**
+ * Whether this call sits in a hand-rolled retry loop, judged by three signals together:
+ * the call is inside a counting loop, it is inside a `try`, and that `try` contains a
+ * `continue` belonging to that same loop.
+ *
+ * The discriminator is the `continue` inside the `try`, because that is what separates retry
+ * from pagination. Pagination advances on the SUCCESS path (`page++`, `hasMore = res.data.next`)
+ * and needs no `continue`; when it does guard against failure it `break`s out rather than going
+ * round again. A retry loop re-enters the loop precisely because the attempt failed.
+ *
+ * An earlier heuristic asked only "is there a loop ancestor" and was deleted: it read 23.7% of
+ * one repo's call sites (pagination) as retry and silently suppressed every genuine finding.
+ * This is narrower on purpose. Measured on a backend that hand-rolls retry in every provider,
+ * it matched 45 of 45 real retry loops, and it matches neither shape of pagination.
+ *
+ * The verdict is 'unknown', never 'library': this proves only that absence of retry cannot be
+ * shown here, so `no-retry` abstains rather than asserting a retry that may not exist.
+ */
+function isInManualRetryLoop(call: CallExpression): boolean {
+  const ancestors = call.getAncestors()
+  // The call's own nearest loop must be the counting loop. A call whose nearest loop is a
+  // `for...of` is iterating a collection, so it is batch work rather than repeated attempts.
+  const loop = nearestLoop(call)
+  if (!loop || !RETRY_LOOPS.includes(loop.getKind())) return false
+  const tryStmt = ancestors.find((a: Node) => a.getKind() === SyntaxKind.TryStatement)
+  // The `try` must sit inside the loop, not wrap it: `try { while (...) {...} } catch {}` is
+  // one attempt at a loop, not a loop of attempts.
+  if (!tryStmt?.getAncestors().some((a: Node) => a === loop)) return false
+  return tryStmt
+    .getDescendantsOfKind(SyntaxKind.ContinueStatement)
+    .some((c) => nearestLoop(c) === loop)
+}
+
 export function resolveOptions(
   call: CallExpression,
   binding: ClientBinding,
@@ -174,6 +222,10 @@ export function resolveOptions(
         : 'none'
   if (retry === 'none' && config && (prop(config, 'retry') || prop(config, 'retries')))
     retry = 'library'
+  // A hand-rolled retry loop is not proof of retry, but it is proof that absence of retry
+  // cannot be shown, so abstain instead of warning. See isInManualRetryLoop for why this is
+  // narrower than the loop-ancestor heuristic that preceded it.
+  if (retry === 'none' && isInManualRetryLoop(call)) retry = 'unknown'
   // A `for`/`while` ancestor was previously treated as a hand-rolled retry loop and mapped
   // to 'manual'. Measured against a real repo, this was wrong: a `while (hasMore) { try {
   // ... } catch {} }` pagination loop is structurally identical to a retry loop, and 23.7%
