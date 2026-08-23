@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -169,5 +169,20 @@ describe('partial analysis is never silently compared', () => {
     } finally {
       chmodSync(secret, 0o755)
     }
+  })
+})
+
+describe('the markdown report discloses baseline suppression', () => {
+  // renderTty says "A suppression the reader cannot see is indistinguishable from a rule that
+  // found nothing." renderMarkdown did not, so `audit --baseline --write-report` wrote a
+  // committed file with an empty summary and empty findings table and no hint that 10 findings
+  // had been suppressed. Indistinguishable from a genuinely clean repo.
+  it('states the accepted count in .apiwatch/audit.md', async () => {
+    const dir = repo(ONE)
+    await makeBaseline(dir)
+    await run(['audit', '--root', dir, '--baseline', join(dir, 'bl.json'), '--write-report'])
+    const md = readFileSync(join(dir, '.apiwatch/audit.md'), 'utf8')
+    expect(md).toMatch(/baseline/i)
+    expect(md).toMatch(/\b4\b/)
   })
 })

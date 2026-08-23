@@ -1,6 +1,7 @@
 import {
   type CallExpression,
   type Node,
+  type ObjectBindingPattern,
   type ObjectLiteralExpression,
   type PropertyAccessExpression,
   type PropertyAssignment,
@@ -9,6 +10,7 @@ import {
   SyntaxKind,
 } from 'ts-morph'
 import type { ClientBinding, ClientKind } from '../model.js'
+import { collectFileImports } from './imports.js'
 
 const TABLE: Record<string, ClientKind> = {
   axios: 'axios',
@@ -111,6 +113,24 @@ function deriveFromCreate(
   return bind(name, base.kind, 'derived', instanceTimeout, instanceRetry)
 }
 
+/**
+ * Whether some module OTHER than `@nestjs/axios` binds the name `HttpService` in this file.
+ * Without this, a file that requires `@nestjs/axios` for an unrelated reason and types a
+ * parameter with its own `HttpService` class gains call sites it should not have.
+ */
+function httpServiceBoundElsewhere(sf: SourceFile): boolean {
+  for (const d of sf.getImportDeclarations()) {
+    if (d.getModuleSpecifierValue() === '@nestjs/axios') continue
+    if (
+      d
+        .getNamedImports()
+        .some((n) => (n.getAliasNode()?.getText() ?? n.getName()) === 'HttpService')
+    )
+      return true
+  }
+  return false
+}
+
 export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   const out = new Map<string, ClientBinding>()
 
@@ -137,7 +157,22 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
     const text = init.getText()
     const req = /^require\(['"]([^'"]+)['"]\)/.exec(text)
     if (req && TABLE[req[1]]) {
-      out.set(v.getName(), bind(v.getName(), TABLE[req[1]], 'import'))
+      const kind = TABLE[req[1]]
+      const nameNode = v.getNameNode()
+      // `const { request } = require('node:http')` is one of the most idiomatic CJS shapes and
+      // was completely invisible: VariableDeclaration.getName() returns the PATTERN SOURCE TEXT
+      // for a destructuring binding ("{ request }"), which can never match a call site. Bind
+      // each element's local name instead, which is what a call actually uses. The same pattern
+      // is already handled correctly in collectImportedNames (static/imports.ts) and
+      // resolveClients (static/registry.ts); detectClients was the odd one out.
+      if (nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
+        for (const el of (nameNode as ObjectBindingPattern).getElements()) {
+          const local = el.getName()
+          if (local) out.set(local, bind(local, kind, 'import'))
+        }
+        continue
+      }
+      out.set(v.getName(), bind(v.getName(), kind, 'import'))
       continue
     }
     const b = deriveFromCreate(out, v.getName(), init)
@@ -188,7 +223,14 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   // parameter's TYPE NODE by substring against its full text (`p.getText()` includes the
   // parameter's own name), so `mockHttpService: MockHttpService` in an ordinary axios test file
   // matched too. Match the type node's own name exactly instead, still purely syntactic.
-  if (sf.getImportDeclarations().some((d) => d.getModuleSpecifierValue() === '@nestjs/axios'))
+  // collectFileImports covers ESM specifiers AND require(...) calls; asking
+  // getImportDeclarations() directly is the CJS blind spot CONTRIBUTING names as a hard
+  // convention violation. Guarded by a shadow check in the same spirit as importBindsFetch: if
+  // another module in this file binds the name `HttpService`, the parameter type is not
+  // necessarily Nest's, so do not claim the call site.
+  const importsNestAxios =
+    collectFileImports(sf).includes('@nestjs/axios') && !httpServiceBoundElsewhere(sf)
+  if (importsNestAxios)
     for (const p of sf.getDescendantsOfKind(SyntaxKind.Parameter)) {
       const typeNode = p.getTypeNode()
       if (typeNode?.getText().trim() === 'HttpService')

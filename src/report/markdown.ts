@@ -9,6 +9,18 @@ export function renderMarkdown(m: ReportModel): string {
     `analysed ${m.filesAnalysed - m.filesSkipped} of ${m.filesAnalysed} files · ` +
       `${m.callSiteCount} outbound call sites`,
   )
+  // Mirror renderTty: a suppression the reader cannot see is indistinguishable from a rule that
+  // found nothing. This file gets committed, so an undisclosed baseline made a repo with 10
+  // suppressed findings look genuinely clean. Spelled out rather than the terse tty form,
+  // because a reader of the committed file did not run the command.
+  if (m.baselineAccepted > 0 || m.baselineResolved > 0) {
+    const parts = [`Baseline suppressed ${m.baselineAccepted} finding(s) (already accepted).`]
+    if (m.baselineResolved > 0)
+      parts.push(
+        `${m.baselineResolved} baseline entr(y/ies) no longer match; run \`apiwatch baseline prune\`.`,
+      )
+    L.push('', parts.join(' '))
+  }
   if (m.nonShippingFilesExcluded > 0)
     L.push(
       '',
