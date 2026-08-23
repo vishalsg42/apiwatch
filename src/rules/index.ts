@@ -38,7 +38,14 @@ export const noTimeout: Rule = {
           'no-timeout',
           'error',
           x,
-          `${x.client} call has no timeout and can hang indefinitely`,
+          // Deliberately "no deadline", not "hangs forever". Measured on Node 24: a native
+          // fetch against a server that accepts and never responds rejects after 301.3s with
+          // UND_ERR_HEADERS_TIMEOUT, because undici applies a ~300s header timeout. axios has
+          // no application timeout at all (its default is 0), so the fallback there is whatever
+          // the socket and the vendor do. Either way the call outlives any request a user is
+          // waiting on, which is the real defect; claiming it hangs forever is not true for
+          // fetch and would be the first thing a reader disproves.
+          `${x.client} call sets no timeout, so it has no deadline of its own`,
           `${x.client}${x.method ? `.${x.method}` : ''}() with no timeout or signal`,
         ),
       ),

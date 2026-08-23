@@ -33,26 +33,52 @@ const bind = (
   instanceRetry = false,
 ): ClientBinding => ({ name, kind, origin, instanceTimeout, instanceRetry })
 
-/**
- * Whether an object literal has an OWN top-level property whose name is in `names`: accepting
- * both a regular `PropertyAssignment` (`{ timeout: 5000 }`) and a `ShorthandPropertyAssignment`
- * (`{ timeout }`). Never descends into nested object literals (e.g. `httpsAgent: new
- * https.Agent({ timeout: 5000 })` must not count) and never scans source text, so a property
- * name that merely appears inside a comment or a nested literal can't match.
- */
-function hasOwnTopLevelProp(obj: ObjectLiteralExpression, names: Set<string>): boolean {
-  return obj
-    .getProperties()
-    .some(
-      (p) =>
-        (p.getKind() === SyntaxKind.PropertyAssignment ||
-          p.getKind() === SyntaxKind.ShorthandPropertyAssignment) &&
-        names.has((p as PropertyAssignment | ShorthandPropertyAssignment).getName()),
-    )
-}
-
 const TIMEOUT_PROPS = new Set(['timeout'])
 const RETRY_PROPS = new Set(['retry', 'retries'])
+
+/**
+ * Whether a named property is present AND not explicitly disabled.
+ *
+ * `axios.create({ timeout: 0 })` sets no timeout at all: 0 is axios's "no timeout" value, the
+ * same as omitting it. Checking only that the property EXISTS read that instance as protected
+ * and silently suppressed no-timeout on every call through it. The same holds for a retry count
+ * of 0, and for `retry: { limit: 0 }`, which is how got's retries are turned off.
+ *
+ * Only a literal 0 (or `false`, or a nested `limit`/`retries`/`maxRetries` of 0) counts as
+ * disabled. A non-literal value cannot be read statically, and a value we cannot read is not
+ * proof of absence, so it still counts as present.
+ */
+function hasEnabledProp(obj: ObjectLiteralExpression, names: Set<string>): boolean {
+  for (const p of obj.getProperties()) {
+    const kind = p.getKind()
+    if (kind === SyntaxKind.ShorthandPropertyAssignment) {
+      // `{ timeout }`: the value is a binding, not readable here, so treat it as present.
+      if (names.has((p as ShorthandPropertyAssignment).getName())) return true
+      continue
+    }
+    if (kind !== SyntaxKind.PropertyAssignment) continue
+    const pa = p as PropertyAssignment
+    if (!names.has(pa.getName())) continue
+    const init = pa.getInitializer()
+    if (!init) return true
+    if (init.getKind() === SyntaxKind.NumericLiteral && Number(init.getText()) === 0) continue
+    if (init.getKind() === SyntaxKind.FalseKeyword) continue
+    // got spells its retry budget as `retry: { limit: 0 }`.
+    if (init.getKind() === SyntaxKind.ObjectLiteralExpression) {
+      const inner = init as ObjectLiteralExpression
+      const disabled = inner.getProperties().some((ip) => {
+        if (ip.getKind() !== SyntaxKind.PropertyAssignment) return false
+        const ipa = ip as PropertyAssignment
+        if (!['limit', 'retries', 'maxRetries', 'attempts'].includes(ipa.getName())) return false
+        const iv = ipa.getInitializer()
+        return !!iv && iv.getKind() === SyntaxKind.NumericLiteral && Number(iv.getText()) === 0
+      })
+      if (disabled) continue
+    }
+    return true
+  }
+  return false
+}
 
 /**
  * Detects `<clientBinding>.create({...})` and, when it resolves to an already-known client
@@ -80,8 +106,8 @@ function deriveFromCreate(
     arg0 && arg0.getKind() === SyntaxKind.ObjectLiteralExpression
       ? (arg0 as ObjectLiteralExpression)
       : undefined
-  const instanceTimeout = !!obj && hasOwnTopLevelProp(obj, TIMEOUT_PROPS)
-  const instanceRetry = !!obj && hasOwnTopLevelProp(obj, RETRY_PROPS)
+  const instanceTimeout = !!obj && hasEnabledProp(obj, TIMEOUT_PROPS)
+  const instanceRetry = !!obj && hasEnabledProp(obj, RETRY_PROPS)
   return bind(name, base.kind, 'derived', instanceTimeout, instanceRetry)
 }
 

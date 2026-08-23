@@ -19,10 +19,17 @@ describe('apiwatch audit', () => {
     expect(r.code).toBe(0)
     expect(r.model.findings).toHaveLength(0)
   })
-  it('writes the markdown report', async () => {
+  it('writes the markdown report only when asked', async () => {
+    const d = tmpCopyOf('simple-express')
+    await runAudit({ root: d, writeReport: true })
+    expect(existsSync(join(d, '.apiwatch/audit.md'))).toBe(true)
+  })
+
+  // An audit reads a repo; it must not leave an untracked file behind on every run.
+  it('leaves the audited repo untouched by default', async () => {
     const d = tmpCopyOf('simple-express')
     await runAudit({ root: d })
-    expect(existsSync(join(d, '.apiwatch/audit.md'))).toBe(true)
+    expect(existsSync(join(d, '.apiwatch'))).toBe(false)
   })
   // Revision 2 asserted filesSkipped > 0 on a malformed file, but TypeScript's parser is
   // error-recovering and never throws on invalid JS; it returns a tree with diagnostics

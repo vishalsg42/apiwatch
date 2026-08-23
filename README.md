@@ -20,7 +20,15 @@ npm i -D apiwatch
 
 ## Before
 
-Node's `fetch` and the `request` library both default to **no timeout**. An unprotected call to a vendor endpoint hangs until that vendor responds, which, if the vendor is down, can be never.
+An outbound call with no timeout has **no deadline of its own**. It does not necessarily hang
+forever, and this README is careful not to claim that: measured on Node 24, a native `fetch`
+against a server that accepts the connection and never responds rejects after **301.3 seconds**
+with `UND_ERR_HEADERS_TIMEOUT`, because undici applies a ~300s header timeout underneath.
+
+That is the *good* case. axios sets no application timeout at all (its default is `0`), so what
+bounds an axios call is the socket and the vendor, not your code. Either way the call outlives
+any request a user is waiting on: your gateway returns a 504 long before, while the outbound
+socket stays open and keeps its resources.
 
 ```js
 // src/proxy/vendor.js
@@ -49,11 +57,13 @@ npx apiwatch audit --root outline
   ⚠ deprecated-client         1
   ⚠ unvalidated-response      2
 
-  app/components/Lightbox.tsx:663  fetch call has no timeout and can hang indefinitely
-  plugins/notion/server/notion.ts:199  fetch call has no timeout and can hang indefinitely
-  shared/editor/lib/FileHelper.ts:56  fetch call has no timeout and can hang indefinitely
-  shared/editor/nodes/Image.tsx:90  fetch call has no timeout and can hang indefinitely
-  server/utils/fetch.ts:167  `node-fetch@2` is superseded by native fetch
+  app/components/Lightbox.tsx:663  fetch call sets no timeout, so it has no deadline of its own
+  plugins/notion/server/notion.ts:199  fetch call sets no timeout, so it has no deadline of its own
+  shared/editor/lib/FileHelper.ts:56  fetch call sets no timeout, so it has no deadline of its own
+  shared/editor/lib/FileHelper.ts:385  fetch call sets no timeout, so it has no deadline of its own
+  shared/editor/nodes/Image.tsx:90  fetch call sets no timeout, so it has no deadline of its own
+  shared/editor/plugins/UploadPlugin.ts:112  fetch call sets no timeout, so it has no deadline of its own
+  app/components/Lightbox.tsx:663  no retry or backoff: one transient failure becomes an error
 ```
 
 **Eight call sites in a 2144-file codebase is the interesting number.** Outline routes its
@@ -100,6 +110,7 @@ npx apiwatch audit [--root <dir>] [--json] [--fail-on error|warn]
 - `--root <dir>`: audit a directory other than the current one.
 - `--json`: emit the machine-readable report (`schemaVersion`, `findings[]`, per-rule counts) instead of the terminal report.
 - `--fail-on error|warn`: exit non-zero when findings of that severity or above exist, for wiring into CI.
+- `--write-report`: write `.apiwatch/audit.md`. Without it the audit only reads, leaving the audited repo untouched.
 - `--include-non-shipping`: also audit `example/`, `benchmark/`, `docs/` and similar directories. They are skipped by default because a missing timeout in sample code cannot page anyone; see Limitations for what that heuristic does and does not catch.
 
 apiwatch never executes your code. It parses source with the TypeScript compiler API, resolves HTTP client bindings (including ones imported across modules, including barrel index files, and instances built with `axios.create()`), and reports based on what's statically knowable at each call site.
@@ -136,7 +147,7 @@ Every one of these is a real, measured gap, not a hedge.
 - **Any `.parse()`/`.validate()`-named call in the enclosing function counts as validation**, as long as the file imports a validator library: apiwatch checks the call's own name and receiver, not that the value it's called on is actually the response. A response handed to some other `.parse()`-named call in the same function (not `JSON.parse`/`Date.parse`, which are explicitly excluded) can read as validated when it isn't.
 - **A client shared across CommonJS modules, or required lazily inside a function body, is resolved**, but a client passed around through less direct means (a factory function's return value, a namespace object's property, DI other than `@nestjs/axios`) may still be invisible, the same false-negative gap that already existed for ESM.
 - **Sample code, benchmarks and docs are skipped, by directory name only.** Measured across six public repos, 10% of all findings sat outside shipped code (`examples/` 2.7%, `benchmark/` 1.8%, `docs/` 0.9%, `scripts/` 4.6%), and in libraries it reached 60% (tinyhttp) and 39% (got) versus 0% for an application like Outline. apiwatch now excludes `example`, `sample`, `demo`, `playground`, `benchmark`, `bench`, `perf`, `fixture`, `mocks`, `cypress` and `doc`/`docs` directories, and reports how many files it left out rather than dropping them silently. Two deliberate gaps: `scripts/`, `tools/` and `bin/` stay in scope, because a release script that fetches with no timeout really does hang CI and enough projects put runtime code there that excluding it would trade a visible false positive for an invisible false negative. And because this matches directory names exactly, it misses sample code stored under another name: Uptime Kuma keeps its examples in `extra/push-examples/`, which no exact-segment rule catches, so its five sample-code findings are still reported.
-- **`apiwatch audit` writes `.apiwatch/audit.md` into the audited repo root** as a side effect of every non-JSON run. This is undocumented elsewhere and not configurable in v0.1; the CLI degrades to a warning (instead of crashing) if the root is read-only.
+- **`no-timeout` means no deadline of its own, not a guaranteed hang.** Measured on Node 24, a native `fetch` against a server that accepts and never responds rejects after 301.3s with `UND_ERR_HEADERS_TIMEOUT`, because undici applies a ~300s header timeout underneath. axios sets no application timeout at all (its default is `0`). And axios's `timeout` is a socket INACTIVITY timeout, not a wall-clock deadline: a vendor trickling one byte every 300ms kept a `timeout: 1000` call alive past 23s in testing. A finding means your code sets no deadline, which is worth fixing, but do not read it as proof the call runs forever.
 
 ## Roadmap
 

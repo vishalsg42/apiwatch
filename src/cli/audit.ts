@@ -15,6 +15,8 @@ export type AuditOptions = {
   root: string
   json?: boolean
   failOn?: 'error' | 'warn'
+  /** Write .apiwatch/audit.md. Off by default: an audit should not mutate the repo it reads. */
+  writeReport?: boolean
   /** Audit sample code, benchmarks and docs alongside shipped code. Off by default. */
   includeNonShipping?: boolean
   // v0.2 will run a target command (e.g. `npm run dev`) to resolve hosts that come from
@@ -53,7 +55,9 @@ export async function runAudit(
   })
   let output = opts.json ? renderJson(model) : renderTty(model)
 
-  if (!opts.json) {
+  // Only write a file when asked. An audit that reads a repo should not leave a new untracked
+  // file in it as a side effect of every run, and 0.1.x did exactly that on every non-JSON run.
+  if (!opts.json && opts.writeReport) {
     // Writing .apiwatch/audit.md is a best-effort side note, not the audit's purpose; a
     // read-only root (CI checkout, container, read-only mount) must not turn a successful
     // audit into an unhandled EACCES rejection. Degrade to a warning line instead.

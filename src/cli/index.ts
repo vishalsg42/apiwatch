@@ -12,6 +12,8 @@ const USAGE = `apiwatch: audit outbound third-party HTTP calls
 
   --include-non-shipping  also audit example/, benchmark/, docs/ and similar
                           directories, which are skipped by default
+  --write-report          write .apiwatch/audit.md; without it the audit only
+                          reads, leaving the audited repo untouched
 `
 const version = () => {
   // dist/cli.js (built) sits one level below repo root; src/cli/index.ts (dev/test,
@@ -46,7 +48,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     const failOnRaw = flag('--fail-on')
     const failOn = failOnRaw === 'error' || failOnRaw === 'warn' ? failOnRaw : undefined
     const includeNonShipping = rest.includes('--include-non-shipping')
-    const result = await runAudit({ root, json, failOn, includeNonShipping })
+    const writeReport = rest.includes('--write-report')
+    const result = await runAudit({ root, json, failOn, includeNonShipping, writeReport })
     io.write(result.output)
     return result.code
   }

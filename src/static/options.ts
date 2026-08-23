@@ -170,6 +170,35 @@ function isInManualRetryLoop(call: CallExpression): boolean {
     .some((c) => nearestLoop(c) === loop)
 }
 
+/**
+ * Whether a `retry`/`retries` option explicitly DISABLES retry. got retries twice by default,
+ * so a got call is trusted as retrying; but `got(url, { retry: { limit: 0 } })` turns that off
+ * and the call then has no retry at all. Reading only the client kind reported those calls as
+ * protected, which is a silent suppression.
+ *
+ * Only a literal 0 or `false` counts as disabled. A value that cannot be read statically is not
+ * proof of anything, so it leaves the existing verdict alone.
+ */
+function retryExplicitlyDisabled(config: Node | undefined): boolean {
+  if (!config) return false
+  for (const name of ['retry', 'retries']) {
+    const found = prop(config, name)
+    if (!found || found.shorthand) continue
+    const init = found.initializer
+    if (init.getKind() === SyntaxKind.NumericLiteral && Number(init.getText()) === 0) return true
+    if (init.getKind() === SyntaxKind.FalseKeyword) return true
+    if (init.getKind() === SyntaxKind.ObjectLiteralExpression) {
+      const inner = init.asKindOrThrow(SyntaxKind.ObjectLiteralExpression)
+      for (const key of ['limit', 'retries', 'maxRetries', 'attempts']) {
+        const ip = inner.getProperty(key)?.asKind(SyntaxKind.PropertyAssignment)?.getInitializer()
+        if (ip && ip.getKind() === SyntaxKind.NumericLiteral && Number(ip.getText()) === 0)
+          return true
+      }
+    }
+  }
+  return false
+}
+
 export function resolveOptions(
   call: CallExpression,
   binding: ClientBinding,
@@ -222,6 +251,9 @@ export function resolveOptions(
         : 'none'
   if (retry === 'none' && config && (prop(config, 'retry') || prop(config, 'retries')))
     retry = 'library'
+  // An explicit `retry: 0` / `retry: { limit: 0 }` overrides both the client-kind default and
+  // the presence check above: the call was deliberately configured NOT to retry.
+  if (retry === 'library' && retryExplicitlyDisabled(config)) retry = 'none'
   // A hand-rolled retry loop is not proof of retry, but it is proof that absence of retry
   // cannot be shown, so abstain instead of warning. See isInManualRetryLoop for why this is
   // narrower than the loop-ancestor heuristic that preceded it.
