@@ -88,6 +88,10 @@ export type ReportModel = {
   callSiteCount: number
   unresolvedHostCount: number
   nonShippingFilesExcluded: number
+  /** Findings suppressed by a baseline. Reported so the suppression is never invisible. */
+  baselineAccepted: number
+  /** Baseline entries with no matching finding: fixed, moved, or renamed. */
+  baselineResolved: number
   countsByRule: Record<string, number>
   findings: Finding[]
 }

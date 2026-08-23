@@ -13,6 +13,18 @@ export function renderTty(m: ReportModel): string {
   )
   // Say what was left out. An exclusion the reader cannot see is indistinguishable from a
   // rule that found nothing, and silent suppression is the harder defect to notice.
+  // Say what the baseline hid. A suppression the reader cannot see is indistinguishable from
+  // a rule that found nothing.
+  if (m.baselineAccepted > 0 || m.baselineResolved > 0)
+    L.push(
+      c(
+        '2',
+        `  baseline: ${m.baselineAccepted} accepted` +
+          (m.baselineResolved > 0
+            ? `, ${m.baselineResolved} resolved (run \`apiwatch baseline prune\`)`
+            : ''),
+      ),
+    )
   if (m.nonShippingFilesExcluded > 0)
     L.push(
       c(

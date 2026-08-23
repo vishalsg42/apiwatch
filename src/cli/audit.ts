@@ -1,5 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { Baseline } from '../baseline.js'
+import { entryKey, keyOf } from '../baseline.js'
 import type { CallSite, ReportModel } from '../model.js'
 import { renderJson } from '../report/json.js'
 import { renderMarkdown } from '../report/markdown.js'
@@ -17,6 +19,8 @@ export type AuditOptions = {
   failOn?: 'error' | 'warn'
   /** Write .apiwatch/audit.md. Off by default: an audit should not mutate the repo it reads. */
   writeReport?: boolean
+  /** Report only findings absent from this baseline. */
+  baseline?: Baseline
   /** Audit sample code, benchmarks and docs alongside shipped code. Off by default. */
   includeNonShipping?: boolean
   // v0.2 will run a target command (e.g. `npm run dev`) to resolve hosts that come from
@@ -45,13 +49,42 @@ export async function runAudit(
       }
     }
 
-  const findings = runRules(sites, ws)
+  const allFindings = runRules(sites, ws)
+
+  // Drift: partition against the baseline by (rule, fingerprint), comparing COUNTS so genuine
+  // duplicates are handled without giving any single one a durable positional identity.
+  let findings = allFindings
+  let baselineAccepted = 0
+  let baselineResolved = 0
+  if (opts.baseline) {
+    const remaining = new Map<string, number>()
+    for (const e of opts.baseline.accepted) remaining.set(entryKey(e), e.count)
+    const fresh: typeof allFindings = []
+    for (const f of allFindings) {
+      const k = keyOf(f)
+      const left = remaining.get(k) ?? 0
+      if (left > 0) {
+        remaining.set(k, left - 1)
+        baselineAccepted += 1
+      } else {
+        fresh.push(f)
+      }
+    }
+    // Whatever is left was accepted once and no longer matches: either fixed or moved. Counted
+    // and reported, never silently dropped, and never a reason to fail: failing here would turn
+    // CI red on a commit that fixed something, and a gate that punishes fixing gets disabled.
+    for (const n of remaining.values()) baselineResolved += n
+    findings = fresh
+  }
+
   const model = buildReport({
     findings,
     sites,
     filesAnalysed: ws.sourceFiles.length,
     filesSkipped,
     nonShippingFilesExcluded: ws.nonShippingFilesExcluded,
+    baselineAccepted,
+    baselineResolved,
   })
   let output = opts.json ? renderJson(model) : renderTty(model)
 

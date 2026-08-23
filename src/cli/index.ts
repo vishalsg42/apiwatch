@@ -3,6 +3,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
+  type Baseline,
   entryKey,
   readBaseline,
   relativeRoot,
@@ -235,10 +236,37 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
   }
   if (argv[0] === 'baseline') return runBaseline(argv, io)
   if (argv[0] === 'audit') {
-    const parsed = parseAuditArgs(argv.slice(1), io)
+    const rest = argv.slice(1)
+    const parsed = parseAuditArgs(rest, io, [], ['--baseline'])
     if (!parsed.ok) return parsed.code
     const { root, json, failOn, includeNonShipping, writeReport } = parsed.args
-    const result = await runAudit({ root, json, failOn, includeNonShipping, writeReport })
+
+    let baseline: Baseline | undefined
+    const blIdx = rest.indexOf('--baseline')
+    if (blIdx !== -1) {
+      const blPath = resolve(rest[blIdx + 1])
+      try {
+        // A --baseline path that does not exist is a usage error, never an empty baseline:
+        // treating it as empty would report every finding as new, and the natural response to
+        // that wall of noise is to stop trusting the gate.
+        baseline = readBaseline(blPath, {
+          root: relativeRoot(blPath, root),
+          includeNonShipping,
+        })
+      } catch (err) {
+        io.write(`apiwatch: ${err instanceof Error ? err.message : String(err)}\n`)
+        return 2
+      }
+    }
+
+    const result = await runAudit({
+      root,
+      json,
+      failOn,
+      includeNonShipping,
+      writeReport,
+      baseline,
+    })
     // Zero source files means the root was wrong, empty, or entirely excluded. Silence there
     // reads as a pass, so say it out loud on stderr without failing the run.
     if (result.model.filesAnalysed === 0)
