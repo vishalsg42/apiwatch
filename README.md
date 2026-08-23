@@ -81,6 +81,47 @@ What survives is genuinely unwrapped: mostly browser-side (`Lightbox`, `Image`, 
 where a missing timeout matters less than on a server, plus one server-side call in the Notion
 plugin. Read that as a well-run codebase with little to fix, not as a demonstration of carnage.
 
+## CI guard
+
+The point of apiwatch is not the first report, which nobody retrofits. It is the second one.
+Record what exists today, then fail the build only when something new appears:
+
+```bash
+npx apiwatch baseline          # writes .apiwatch-baseline.json, commit it
+```
+
+```yaml
+# .github/workflows/apiwatch.yml
+name: apiwatch
+on: [pull_request]
+jobs:
+  outbound-http:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npx apiwatch@0.3 audit --baseline .apiwatch-baseline.json --fail-on error
+```
+
+The baseline survives ordinary work: inserting lines, reformatting, reordering calls, renaming a
+local variable. It does not survive editing a call's URL, renaming its enclosing function, or
+renaming the file, all of which re-key that finding deliberately.
+
+Two commands keep it current, and they are deliberately separate:
+
+```bash
+npx apiwatch baseline prune    # drop entries that no longer match; accepts nothing
+npx apiwatch baseline accept   # add findings that are currently new, printing each first
+```
+
+A single "update" that did both would be a footgun: the natural moment to run it is straight
+after CI fails, which is exactly when accepting everything currently visible is wrong.
+
+**Fixing a finding never fails the build.** Its baseline entry becomes "resolved" and is
+reported, not enforced. A gate that punishes fixing things gets switched off.
+
 ## Measuring a corpus
 
 `scripts/scan-corpus.ts` runs the audit across many repositories and reports aggregates only,
@@ -111,6 +152,7 @@ npx apiwatch audit [--root <dir>] [--json] [--fail-on error|warn]
 - `--json`: emit the machine-readable report (`schemaVersion`, `findings[]`, per-rule counts) instead of the terminal report.
 - `--fail-on error|warn`: exit non-zero when findings of that severity or above exist, for wiring into CI.
 - `--fail-on error|warn` / `--root` / `--json` are validated: an unknown flag, a missing flag value, a bad `--fail-on`, or a root that does not exist or is not a directory exits `2` rather than reporting a clean audit.
+- `--baseline <file>`: report only findings absent from the baseline. A path that does not exist is an error (exit 2), never an empty baseline.
 - `--write-report`: write `.apiwatch/audit.md`. Without it the audit only reads, leaving the audited repo untouched.
 - `--include-non-shipping`: also audit `example/`, `benchmark/`, `docs/` and similar directories. They are skipped by default because a missing timeout in sample code cannot page anyone; see Limitations for what that heuristic does and does not catch.
 
@@ -149,14 +191,21 @@ Every one of these is a real, measured gap, not a hedge.
 - **Any `.parse()`/`.validate()`-named call in the enclosing function counts as validation**, as long as the file imports a validator library: apiwatch checks the call's own name and receiver, not that the value it's called on is actually the response. A response handed to some other `.parse()`-named call in the same function (not `JSON.parse`/`Date.parse`, which are explicitly excluded) can read as validated when it isn't.
 - **A client shared across CommonJS modules, or required lazily inside a function body, is resolved**, but a client passed around through less direct means (a factory function's return value, a namespace object's property, DI other than `@nestjs/axios`) may still be invisible, the same false-negative gap that already existed for ESM.
 - **Sample code, benchmarks and docs are skipped, by directory name only.** Measured across six public repos, 10% of all findings sat outside shipped code (`examples/` 2.7%, `benchmark/` 1.8%, `docs/` 0.9%, `scripts/` 4.6%), and in libraries it reached 60% (tinyhttp) and 39% (got) versus 0% for an application like Outline. apiwatch now excludes `example`, `sample`, `demo`, `playground`, `benchmark`, `bench`, `perf`, `fixture`, `mocks`, `cypress` and `doc`/`docs` directories, and reports how many files it left out rather than dropping them silently. Two deliberate gaps: `scripts/`, `tools/` and `bin/` stay in scope, because a release script that fetches with no timeout really does hang CI and enough projects put runtime code there that excluding it would trade a visible false positive for an invisible false negative. And because this matches directory names exactly, it misses sample code stored under another name: Uptime Kuma keeps its examples in `extra/push-examples/`, which no exact-segment rule catches, so its five sample-code findings are still reported.
+- **Finding identity is structural, not positional.** A finding is keyed by its rule plus the file, enclosing scope, client, method and target URL of the call. That is what lets a baseline survive line insertions and reformatting. Three consequences are deliberate and worth knowing: editing a call's URL, renaming its enclosing function, and renaming the file all re-key the finding, so it reads as new once and the baseline needs `apiwatch baseline accept`. A file rename produces both new and resolved entries for everything in it.
+- **Byte-identical calls in one scope are counted, not individually identified.** If two calls in the same function are identical in client, method and URL expression, the baseline stores a count of two rather than two distinguishable entries. Fixing one and adding another in the same commit leaves the count unchanged, so the new one is not reported. Measured across four real repos this affects 0 of 15 findings in Outline, 0 of 72 in one production backend, 0 of 266 in another, and 2 of 84 in documenso.
 - **`no-timeout` means no deadline of its own, not a guaranteed hang.** Measured on Node 24, a native `fetch` against a server that accepts and never responds rejects after 301.3s with `UND_ERR_HEADERS_TIMEOUT`, because undici applies a ~300s header timeout underneath. axios sets no application timeout at all (its default is `0`). And axios's `timeout` is a socket INACTIVITY timeout, not a wall-clock deadline: a vendor trickling one byte every 300ms kept a `timeout: 1000` call alive past 23s in testing. A finding means your code sets no deadline, which is worth fixing, but do not read it as proof the call runs forever.
 
 ## Roadmap
 
-v0.1 is static analysis only: it never runs your code. Two things are explicitly out of scope for this release and planned for v0.2:
+apiwatch is static analysis only: it never runs your code. Drift detection shipped in v0.3.0,
+see [CI guard](#ci-guard). Still out of scope:
 
-- **Runtime recording**: attaching to `fetch`/`http` at runtime to observe real timeouts, retries and response shapes, resolving the hosts static analysis can't.
-- **Drift detection**, planned for v0.2: comparing today's audit against a stored baseline so a new unprotected call site fails CI, even when the rest of the repo is already accepted.
+- **SARIF output**, reusing the finding fingerprints as `partialFingerprints` so GitHub can
+  deduplicate alerts, plus a published GitHub Action.
+- **Response-value tracking** for `unvalidated-response`, which is why that rule is `info` and
+  cannot fail a build today.
+- **Runtime recording**: attaching to `fetch`/`http` at runtime to observe real timeouts,
+  retries and response shapes, resolving the hosts static analysis cannot.
 
 ## License
 

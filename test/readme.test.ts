@@ -11,8 +11,12 @@ describe('readme', () => {
     expect(readme()).toMatch(/## Before/)
     expect(readme()).toMatch(/## After/)
   })
-  it('states plainly that v0.1 is static-only', () =>
+  it('states plainly that it is static-only', () =>
     expect(readme()).toMatch(/static[^\n]*only|does not run your (app|code)/i))
   it('documents the known limitations honestly', () => expect(readme()).toMatch(/## Limitations/))
-  it('says drift detection is future work', () => expect(readme()).toMatch(/drift[^\n]*v0\.2/i))
+  it('documents the CI guard with a copy-pasteable workflow', () => {
+    expect(readme()).toMatch(/## CI guard/)
+    expect(readme()).toMatch(/apiwatch baseline/)
+    expect(readme()).toMatch(/--baseline \.apiwatch-baseline\.json/)
+  })
 })
