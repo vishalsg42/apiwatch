@@ -59,3 +59,19 @@ describe('client bindings', () => {
     expect(b?.instanceRetry).toBe(false)
   })
 })
+
+describe('a local fetch wrapper is not native fetch', () => {
+  // Regression: `import fetch from "@server/utils/fetch"` was read as native fetch, so four
+  // calls in Outline were reported as having no timeout when they route through a wrapper
+  // that accepts one. An import binding the name `fetch` shadows the global.
+  it('ignores a fetch imported from a local module', async () =>
+    expect((await clientsFor('wrapper-fetch', 'wrapped.ts')).has('fetch')).toBe(false))
+
+  it('still detects native fetch in a file that does not import it', async () =>
+    expect((await clientsFor('wrapper-fetch', 'native.ts')).get('fetch')?.kind).toBe('fetch'))
+
+  it('still detects node-fetch, which binds the same name from a known module', async () =>
+    expect((await clientsFor('wrapper-fetch', 'nodefetch.ts')).get('fetch')?.kind).toBe(
+      'node-fetch',
+    ))
+})

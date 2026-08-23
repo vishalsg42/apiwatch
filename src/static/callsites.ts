@@ -113,6 +113,28 @@ function declaresFetch(node: Node): boolean {
   return false
 }
 
+/**
+ * Whether the file imports something under the name `fetch`. An import binding is file-scoped
+ * and so shadows the global for EVERY bare `fetch(...)` in the file, which the ancestor-scope
+ * walk below cannot see (imports are not a scope in the chain).
+ *
+ * This is the common house pattern of wrapping fetch in a local module to add SSRF filtering,
+ * proxy support or a default timeout. Outline's `import fetch from "@server/utils/fetch"` was
+ * read as native fetch and produced four no-timeout findings against a wrapper that takes a
+ * timeout option. An import from a known client module (`import fetch from 'node-fetch'`) is
+ * already bound to its real kind in `clients`, and that binding still wins below.
+ */
+function importBindsFetch(sf: SourceFile): boolean {
+  return sf
+    .getImportDeclarations()
+    .some(
+      (d) =>
+        d.getDefaultImport()?.getText() === 'fetch' ||
+        d.getNamespaceImport()?.getText() === 'fetch' ||
+        d.getNamedImports().some((n) => (n.getAliasNode()?.getText() ?? n.getName()) === 'fetch'),
+    )
+}
+
 /** Scope-aware shadow check: does THIS call's enclosing scope chain shadow `fetch`? */
 function isFetchShadowedHere(call: CallExpression): boolean {
   return call.getAncestors().some(declaresFetch)
@@ -127,6 +149,7 @@ export function findCallSites(
   const root = ws.root.endsWith('/') ? ws.root.slice(0, -1) : ws.root // a user-supplied --root may carry a trailing slash
   const file = abs.startsWith(`${root}/`) ? abs.slice(root.length + 1) : abs
   const fileImports = collectFileImports(sf)
+  const fetchIsImported = importBindsFetch(sf)
   const out: CallSite[] = []
 
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
@@ -151,7 +174,10 @@ export function findCallSites(
       // walking this call's own ancestor scopes, so a shadowed `fetch` elsewhere in the file
       // doesn't erase a genuine native-fetch call site here.
       if (isFetchShadowedHere(call)) continue
-      b = clients.get('fetch') ?? NATIVE_FETCH
+      // Fall back to the global ONLY when nothing in the file binds the name. `clients` holds a
+      // binding when the import came from a known client module; a local wrapper leaves it
+      // empty, and assuming the global there invents a call site that does not exist.
+      b = clients.get('fetch') ?? (fetchIsImported ? undefined : NATIVE_FETCH)
     } else {
       b = binding ? clients.get(binding) : undefined
     }

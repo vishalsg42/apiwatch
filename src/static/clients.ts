@@ -169,14 +169,34 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
         out.set(p.getName(), bind(p.getName(), 'nestjs-axios', 'import'))
     }
 
-  const shadowed = sf
-    .getDescendantsOfKind(SyntaxKind.Identifier)
+  // Native `fetch` is a global, so it is assumed present unless this file binds the name to
+  // something else. An import that binds `fetch` is the case that matters most in real code:
+  // wrapping fetch in a local module (to add SSRF filtering, proxy support, a default timeout)
+  // is a common house pattern, and treating those calls as native fetch reports a timeout the
+  // wrapper may well set. Outline's `import fetch from "@server/utils/fetch"` was read as
+  // native fetch and produced four findings against a wrapper that accepts a timeout option.
+  //
+  // An import from a module in TABLE (`import fetch from 'node-fetch'`) has already been bound
+  // to its real client above, so skipping the native binding here never loses that call site.
+  const importBindsFetch = sf
+    .getImportDeclarations()
     .some(
-      (i: Node) =>
-        i.getText() === 'fetch' &&
-        (i.getParent()?.getKind() === SyntaxKind.Parameter ||
-          i.getParent()?.getKind() === SyntaxKind.VariableDeclaration),
+      (d) =>
+        d.getDefaultImport()?.getText() === 'fetch' ||
+        d.getNamespaceImport()?.getText() === 'fetch' ||
+        d.getNamedImports().some((n) => (n.getAliasNode()?.getText() ?? n.getName()) === 'fetch'),
     )
+  const shadowed =
+    importBindsFetch ||
+    sf
+      .getDescendantsOfKind(SyntaxKind.Identifier)
+      .some(
+        (i: Node) =>
+          i.getText() === 'fetch' &&
+          (i.getParent()?.getKind() === SyntaxKind.Parameter ||
+            i.getParent()?.getKind() === SyntaxKind.VariableDeclaration ||
+            i.getParent()?.getKind() === SyntaxKind.FunctionDeclaration),
+      )
   if (!shadowed) out.set('fetch', bind('fetch', 'fetch', 'import'))
   return out
 }
