@@ -68,7 +68,11 @@ function configArgIndex(
       // all and reported a false no-timeout on a correctly-protected call.
       return method === undefined ? 0 : 1
     case 'node:http':
-      return method === 'request' ? 0 : undefined // http.request(options, cb)
+      // Both http.request(options, cb) and http.get(options, cb) take their options at index 0.
+      // Reading only `request` reported a valid `http.get({ timeout: 5000 })` as having none.
+      // The (url, options, cb) overload puts them at index 1, so accept an object literal in
+      // either position; pickConfigArg only treats an ObjectLiteralExpression as readable.
+      return method === 'request' || method === 'get' ? 0 : undefined
     default:
       return undefined
   }

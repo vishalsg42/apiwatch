@@ -38,8 +38,7 @@
     "lint": "biome check ."
   },
   "dependencies": {
-    "ts-morph": "^28",
-    "citty": "^0.2"
+    "ts-morph": "^28"
   },
   "devDependencies": {
     "vitest": "^4",

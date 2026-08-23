@@ -6,7 +6,7 @@
 [![node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/apiwatch.svg)](https://www.npmjs.com/package/apiwatch)
 
-A zero-config CLI that statically audits outbound third-party HTTP calls in your Node/TypeScript repo: no timeout, no retry, no response validation, one AST pass, no code runs.
+A zero-config CLI that statically audits outbound third-party HTTP calls in your Node/TypeScript repo: no timeout, no retry, no response validation, parses each file once with no type resolution, and never runs your code.
 
 ```
 npx apiwatch audit
@@ -110,6 +110,7 @@ npx apiwatch audit [--root <dir>] [--json] [--fail-on error|warn]
 - `--root <dir>`: audit a directory other than the current one.
 - `--json`: emit the machine-readable report (`schemaVersion`, `findings[]`, per-rule counts) instead of the terminal report.
 - `--fail-on error|warn`: exit non-zero when findings of that severity or above exist, for wiring into CI.
+- `--fail-on error|warn` / `--root` / `--json` are validated: an unknown flag, a missing flag value, a bad `--fail-on`, or a root that does not exist or is not a directory exits `2` rather than reporting a clean audit.
 - `--write-report`: write `.apiwatch/audit.md`. Without it the audit only reads, leaving the audited repo untouched.
 - `--include-non-shipping`: also audit `example/`, `benchmark/`, `docs/` and similar directories. They are skipped by default because a missing timeout in sample code cannot page anyone; see Limitations for what that heuristic does and does not catch.
 
