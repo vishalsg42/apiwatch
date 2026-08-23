@@ -7,6 +7,29 @@ apiwatch is pre-1.0, so minor versions may change behaviour. Each entry says whe
 more findings or fewer after upgrading, because a change in finding count is otherwise
 indistinguishable from a regression.
 
+## 0.3.3 (2026-08-23)
+
+**Expect more findings on CommonJS codebases.** Three import shapes were silently invisible.
+
+- **Destructured `require` bound no client at all.** `VariableDeclaration.getName()` returns the
+  pattern source text for a destructuring binding (`"{ request }"`), which can never match a call
+  site, so `const { request } = require('node:http')`, `const { got } = require('got')` and
+  `const { default: axios } = require('axios')` all resolved to zero call sites. The last is the
+  standard CJS interop idiom for an ESM default. Measured on one real backend: 93 call sites
+  became 110, none lost.
+- **`const fetch = require('node-fetch')` resolved to zero call sites**, because the per-call
+  shadow walk ran before the resolved client was consulted and treated the declaration as
+  shadowing the global.
+- **`@nestjs/axios` detection was ESM-only.** Narrower in practice than it sounds, since compiled
+  output is skipped and carries no type annotations.
+- **A new client-by-import-shape test matrix** (14 fixtures) now enforces what CONTRIBUTING only
+  documented. It found the `node-fetch` bug above.
+- **The Markdown report hid baseline suppression.** `audit --baseline --write-report` wrote a
+  committed file with an empty summary and empty findings table and no hint that anything had
+  been suppressed, indistinguishable from a clean repo.
+- **Six documentation claims corrected**, including a README output block that declared 15
+  findings while showing 7. Both documented output blocks are now pinned by tests.
+
 ## 0.3.2 (2026-08-23)
 
 Documentation only, no behaviour change.
