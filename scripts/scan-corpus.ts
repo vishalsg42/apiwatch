@@ -8,7 +8,7 @@
 // main() removes its temp clone directory when it finishes, success or failure. Set
 // APIWATCH_KEEP_CLONES=1 to keep the clones around, e.g. to inspect a specific repo's
 // results after the run.
-import { execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -101,6 +101,24 @@ function mergeStats(into: CorpusStats, from: CorpusStats): void {
 // repo cannot hold up the rest of the corpus.
 const CLONE_TIMEOUT_MS = Number(process.env.APIWATCH_CLONE_TIMEOUT_MS ?? 5 * 60_000)
 
+// Clones are network bound and scans are CPU and memory bound, so the two parallelise very
+// differently. Clone a window of repos at once, then scan them one at a time: scanning several
+// large repos concurrently is what exhausts the V8 heap, and a serial scan keeps peak memory
+// at roughly one repo's worth no matter how wide the clone window is.
+const CLONE_CONCURRENCY = Number(process.env.APIWATCH_CLONE_CONCURRENCY ?? 4)
+
+const cloneOne = (url: string, dest: string): Promise<boolean> =>
+  new Promise((resolve) => {
+    execFile(
+      'git',
+      ['clone', '--depth', '1', '--quiet', url, dest],
+      { timeout: CLONE_TIMEOUT_MS },
+      // A clone that fails or times out still resolves: scanCorpus finds nothing at `dest`
+      // and records it as a failed repo, the same as any repo that fails to analyse.
+      (err) => resolve(!err),
+    )
+  })
+
 async function main() {
   const argv = process.argv.slice(2)
   // `--skip <n>` drops the first n urls, so a run aborted partway can resume without
@@ -137,37 +155,36 @@ async function main() {
       byRule: {},
     }
 
-    for (const [i, url] of urls.entries()) {
-      const n = i + 1
-      const dest = join(base, `repo-${i}`)
-      process.stderr.write(`[${n}/${urls.length}] cloning ${repoLabel(url)}\n`)
-      try {
-        // Cap the clone. aws-sdk-js-v3 stalled a 102 repo run indefinitely on the clone alone,
-        // so one oversized repo could block every repo behind it. A repo that cannot be
-        // fetched inside the cap is counted as failed, the same as an unclonable url.
-        execFileSync('git', ['clone', '--depth', '1', '--quiet', url, dest], {
-          stdio: 'ignore',
-          timeout: CLONE_TIMEOUT_MS,
-        })
-      } catch {
-        // an unclonable URL still gets counted: scanCorpus will find nothing at `dest` and
-        // record it as a failed repo, same as any repo that fails to analyse.
+    let done = 0
+    for (let w = 0; w < urls.length; w += CLONE_CONCURRENCY) {
+      const window = urls.slice(w, w + CLONE_CONCURRENCY)
+      process.stderr.write(`cloning ${window.length}: ${window.map(repoLabel).join(', ')}\n`)
+      // Fetch the whole window at once, then scan serially. Only the clones overlap.
+      const cloned = await Promise.all(
+        window.map((url, k) => cloneOne(url, join(base, `repo-${w + k}`))),
+      )
+
+      for (const [k, url] of window.entries()) {
+        const dest = join(base, `repo-${w + k}`)
+        done += 1
+        const result = await scanCorpus([dest], { includeNonShipping })
+        mergeStats(stats, result)
+        process.stderr.write(
+          `[${done}/${urls.length}] ${repoLabel(url)}: ${result.callSites} sites` +
+            `${cloned[k] ? '' : ' (clone failed)'}\n`,
+        )
+
+        // Free the clone as soon as it is scanned. Holding every clone until the end cost
+        // 3.1 GB across 19 repos, so a 100 repo run would need roughly 17 GB of disk for
+        // trees that are never read again.
+        if (!keepClones) rmSync(dest, { recursive: true, force: true })
+
+        // A single oversized repo can exhaust the V8 heap and abort the process, which takes
+        // every prior repo's work with it. Writing the running total after each repo means a
+        // crash costs one repo instead of the whole run, and `--skip` resumes from here.
+        if (partialPath)
+          writeFileSync(partialPath, `${JSON.stringify({ scanned: done, stats }, null, 2)}\n`)
       }
-
-      const result = await scanCorpus([dest], { includeNonShipping })
-      mergeStats(stats, result)
-      process.stderr.write(`[${n}/${urls.length}] scanned: ${result.callSites} sites\n`)
-
-      // Free the clone as soon as it is scanned. Holding every clone until the end cost
-      // 3.1 GB across 19 repos, so a 100 repo run would need roughly 17 GB of disk for
-      // trees that are never read again.
-      if (!keepClones) rmSync(dest, { recursive: true, force: true })
-
-      // A single oversized repo can exhaust the V8 heap and abort the process, which takes
-      // every prior repo's work with it. Writing the running total after each repo means a
-      // crash costs one repo instead of the whole run, and `--skip` resumes from here.
-      if (partialPath)
-        writeFileSync(partialPath, `${JSON.stringify({ scanned: n, stats }, null, 2)}\n`)
     }
 
     // Print before cleanup, not after: stats must reach stdout even though the finally
