@@ -57,6 +57,6 @@ describe('audit argument validation', () => {
   it('still accepts a valid invocation', async () => {
     const r = await run(['audit', '--root', fx('simple-express'), '--json'])
     expect(r.code).toBe(0)
-    expect(JSON.parse(r.out).schemaVersion).toBe(1)
+    expect(JSON.parse(r.out).schemaVersion).toBe(2)
   })
 })

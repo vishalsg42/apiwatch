@@ -140,6 +140,166 @@ function isFetchShadowedHere(call: CallExpression): boolean {
   return call.getAncestors().some(declaresFetch)
 }
 
+/**
+ * Bumped whenever the fingerprint derivation below changes, so a baseline written by an older
+ * apiwatch is detectably incompatible rather than silently mismatching every entry.
+ */
+export const FP_VERSION = 1
+
+/** Every loop-free ancestor kind that owns a nameable scope. */
+const NAMED_SCOPE_KINDS = new Set([
+  SyntaxKind.ClassDeclaration,
+  SyntaxKind.ClassExpression,
+  SyntaxKind.ModuleDeclaration,
+])
+const NAMED_FN_KINDS = new Set([
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.Constructor,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.SetAccessor,
+])
+const NAMEABLE_DECL_KINDS = new Set([
+  SyntaxKind.VariableDeclaration,
+  SyntaxKind.PropertyDeclaration,
+  SyntaxKind.PropertyAssignment,
+])
+
+const nameOf = (n: Node): string | undefined => {
+  const maybe = n as unknown as { getName?: () => string | undefined }
+  try {
+    return typeof maybe.getName === 'function' ? maybe.getName() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The dotted chain of enclosing named scopes, outermost first, or `<module>`.
+ *
+ * The rule that matters: a plain declaration (`const x = ...`) contributes its name ONLY when a
+ * function-like node sits between the call and that declaration. That distinguishes a
+ * declaration which OWNS a scope containing the call from one merely being ASSIGNED the call's
+ * result:
+ *
+ *   const publicApi = { get: () => axios.get(u) }   ->  publicApi.get   (arrow in between)
+ *   const response  = await axios.get(u)            ->  <enclosing fn>  (nothing in between)
+ *
+ * Without it, `const response = await axios.get(u)` yields "getUser.response", and
+ * `const { data } = await axios.get(u)` yields "getUser.{ data }" from binding-pattern SOURCE
+ * TEXT, which would re-key on reformatting. Both verified against ts-morph 28.
+ *
+ * Accessors are tagged by kind so a getter and a setter of the same name stay distinct.
+ */
+function symbolPathOf(call: CallExpression): string {
+  const parts: string[] = []
+  let sawFunction = false
+  let child: Node = call
+  for (const a of call.getAncestors()) {
+    const kind = a.getKind()
+
+    // An anonymous callback passed to a call gets that call as its scope name, so route
+    // handlers stay distinct. Six byte-identical `axios.get(fileCheckUrl)` calls in one real
+    // file sat in six anonymous `router.post("/send-report-*", ...)` handlers and were
+    // otherwise indistinguishable. The first string argument is included because it is what
+    // names the handler; without it every route in a file collapses to `router.post`.
+    if (kind === SyntaxKind.CallExpression && sawFunction) {
+      const ce = a as CallExpression
+      if (ce.getArguments().some((arg) => arg === child)) {
+        const callee = ce.getExpression().getText()
+        const label = ce.getArguments().find((arg) => arg.getKind() === SyntaxKind.StringLiteral)
+        parts.push(
+          label
+            ? `${callee}(${(label as unknown as { getLiteralValue(): string }).getLiteralValue()})`
+            : callee,
+        )
+        child = a
+        continue
+      }
+    }
+    child = a
+    if (FN_LIKE_KINDS.has(kind)) {
+      if (NAMED_FN_KINDS.has(kind)) {
+        const n = nameOf(a)
+        if (n) {
+          const tag =
+            kind === SyntaxKind.GetAccessor ? ':get' : kind === SyntaxKind.SetAccessor ? ':set' : ''
+          parts.push(n + tag)
+        }
+      }
+      sawFunction = true
+      continue
+    }
+    if (NAMED_SCOPE_KINDS.has(kind)) {
+      const n = nameOf(a)
+      if (n) parts.push(n)
+      continue
+    }
+    if (NAMEABLE_DECL_KINDS.has(kind) && sawFunction) {
+      const n = nameOf(a)
+      if (n) parts.push(n)
+    }
+  }
+  return parts.reverse().join('.') || '<module>'
+}
+
+/**
+ * A format-independent key for the call's target, derived from `pickUrlArg` so it also reaches a
+ * `url:`/`uri:` property inside a first-position options object (the `request` shape).
+ *
+ * String literals contribute their DECODED value, never their source text, so a quote-style flip
+ * (`'/users'` -> `"/users"`) cannot re-key a finding. One `.prettierrc` change would otherwise
+ * invalidate an entire baseline. There is no truncation: the value is hashed anyway, and
+ * truncating only creates collisions between urls that differ late.
+ */
+function urlKeyOf(call: CallExpression): string {
+  const arg = pickUrlArg(call)
+  if (!arg) return '()'
+  const kind = arg.getKind()
+  if (kind === SyntaxKind.StringLiteral || kind === SyntaxKind.NoSubstitutionTemplateLiteral) {
+    return (arg as unknown as { getLiteralValue(): string }).getLiteralValue()
+  }
+  if (kind === SyntaxKind.TemplateExpression) {
+    // Rebuild from cooked literal text plus placeholders, so indentation and line breaks inside
+    // a multi-line template cannot change the key.
+    const t = arg as unknown as {
+      getHead(): { getLiteralText(): string }
+      getTemplateSpans(): { getExpression(): Node; getLiteral(): { getLiteralText(): string } }[]
+    }
+    let out = t.getHead().getLiteralText()
+    for (const span of t.getTemplateSpans()) {
+      out += `\${${span.getExpression().getText()}}${span.getLiteral().getLiteralText()}`
+    }
+    return out
+  }
+  if (kind === SyntaxKind.Identifier || kind === SyntaxKind.PropertyAccessExpression) {
+    return arg.getText()
+  }
+  return SyntaxKind[kind] ?? 'unknown'
+}
+
+/** Position-independent identity for a call site. See FP_VERSION. */
+export function fingerprintOf(
+  call: CallExpression,
+  file: string,
+  client: string,
+  method: string | undefined,
+): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify([
+        FP_VERSION,
+        file,
+        symbolPathOf(call),
+        client,
+        method ?? 'request',
+        urlKeyOf(call),
+      ]),
+    )
+    .digest('hex')
+    .slice(0, 24)
+}
+
 export function findCallSites(
   sf: SourceFile,
   clients: Map<string, ClientBinding>,
@@ -191,10 +351,13 @@ export function findCallSites(
     const { line, column } = sf.getLineAndColumnAtPos(call.getStart())
     const urlArg = pickUrlArg(call)
     out.push({
+      // Unchanged and position-DEPENDENT on purpose: it identifies a physical occurrence, which
+      // is what keeps two calls on one line distinct. Baseline identity is `fingerprint`.
       id: createHash('sha1')
         .update(`${file}:${line}:${column}:${b.kind}`)
         .digest('hex')
         .slice(0, 12),
+      fingerprint: fingerprintOf(call, file, b.kind, method),
       file,
       line,
       column,

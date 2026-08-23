@@ -69,6 +69,7 @@ export function classify(exprText: string | undefined) {
 
 export const site = (over: Partial<CallSite> = {}): CallSite => ({
   id: 'a1',
+  fingerprint: 'fp-a1',
   file: 'src/x.ts',
   line: 10,
   column: 2,

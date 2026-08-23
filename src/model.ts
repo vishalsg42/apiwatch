@@ -46,7 +46,9 @@ export type ClientBinding = {
 }
 
 export type CallSite = {
-  id: string // sha1(`${file}:${line}:${column}:${client}`).slice(0,12)
+  id: string // sha1(`${file}:${line}:${column}:${client}`).slice(0,12); identifies a PHYSICAL occurrence
+  /** Position-independent identity, for baselines. See FP_VERSION in static/callsites.ts. */
+  fingerprint: string
   file: string // REPO-RELATIVE, posix
   line: number // 1-based
   column: number // 1-based
@@ -62,6 +64,8 @@ export type Finding = {
   // 'info' never fails CI, not even under --fail-on warn. It is for findings that are worth
   // surfacing but are not defects on their own, such as a deliberately hardcoded vendor host.
   severity: 'error' | 'warn' | 'info'
+  /** Baseline identity. Always paired with `rule`: one call site yields several findings. */
+  fingerprint: string
   callSiteId: string
   file: string
   line: number
@@ -78,7 +82,7 @@ export type Workspace = {
 }
 
 export type ReportModel = {
-  schemaVersion: 1
+  schemaVersion: 2
   filesAnalysed: number
   filesSkipped: number
   callSiteCount: number

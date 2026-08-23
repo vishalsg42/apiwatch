@@ -34,6 +34,6 @@ describe('reporters', () => {
     expect(renderTty(model())).toMatch(/analysed 10 of 10 files/))
   it('markdown contains a findings table header', () =>
     expect(renderMarkdown(model())).toMatch(/\| rule \|/i))
-  it('json carries schemaVersion 1', () =>
-    expect(JSON.parse(renderJson(model())).schemaVersion).toBe(1))
+  it('json carries schemaVersion 2', () =>
+    expect(JSON.parse(renderJson(model())).schemaVersion).toBe(2))
 })

@@ -11,7 +11,7 @@ export function buildReport(input: {
   for (const f of input.findings) countsByRule[f.rule] = (countsByRule[f.rule] ?? 0) + 1
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     filesAnalysed: input.filesAnalysed,
     filesSkipped: input.filesSkipped,
     callSiteCount: input.sites.length,

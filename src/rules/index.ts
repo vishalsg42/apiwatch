@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import type { CallSite, Finding, Workspace } from '../model.js'
+import { FP_VERSION } from '../static/callsites.js'
 export type Rule = {
   name: string
   severity: 'error' | 'warn' | 'info'
@@ -10,7 +12,30 @@ const F = (
   s: CallSite,
   message: string,
   evidence: string,
-): Finding => ({ rule, severity, callSiteId: s.id, file: s.file, line: s.line, message, evidence })
+  /**
+   * File-level rules pass their own identity. `deprecatedClient` and `legacyClient` emit ONE
+   * finding per file and anchor it to whichever matching call site happened to come first, so
+   * borrowing that call's fingerprint makes the finding re-key whenever calls are reordered.
+   * Their identity is the file, not a call.
+   */
+  fingerprint = s.fingerprint,
+): Finding => ({
+  rule,
+  severity,
+  fingerprint,
+  callSiteId: s.id,
+  file: s.file,
+  line: s.line,
+  message,
+  evidence,
+})
+
+/** Stable identity for a rule that fires once per file rather than once per call. */
+const fileFingerprint = (rule: string, file: string): string =>
+  createHash('sha256')
+    .update(JSON.stringify([FP_VERSION, 'file-level', rule, file]))
+    .digest('hex')
+    .slice(0, 24)
 
 // `undefined` covers a call whose method truly can't be read at all (e.g. a bare `fetch(url)`
 // with no config object); those default to HTTP GET, which is idempotent, so treating unknown
@@ -134,6 +159,7 @@ export const deprecatedClient: Rule = {
           x,
           `\`${x.client}\` is unmaintained since 2020`,
           `file imports ${x.client}`,
+          fileFingerprint('deprecated-client', x.file),
         ),
       )
     }
@@ -166,6 +192,7 @@ export const legacyClient: Rule = {
           x,
           '`node-fetch@2` is superseded by the global fetch in Node >= 18',
           `file imports ${x.client}`,
+          fileFingerprint('legacy-client', x.file),
         ),
       )
     }
