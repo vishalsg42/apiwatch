@@ -75,6 +75,34 @@ describe('baseline file', () => {
     expect(() => readBaseline(p)).toThrow(/fingerprintVersion/i)
   })
 
+  // The message is the whole user experience of this error: it is thrown in CI, where nobody can
+  // experiment. A real report had a workflow on a floating `apiwatch@0.3` range go red the moment
+  // a fingerprintVersion bump published, with the message naming one command and not the order to
+  // run it in. Naming `apiwatch baseline` alone is not enough, because regenerating accepts every
+  // finding currently visible, including new error-severity ones, and prints only a count.
+  it('tells you to review BEFORE regenerating, and to pin a version', () => {
+    const p = tmp()
+    writeBaseline(p, [finding()], '0.3.0', opts)
+    const raw = JSON.parse(readFileSync(p, 'utf8'))
+    raw.fingerprintVersion = 999
+    writeFileSync(p, JSON.stringify(raw))
+    let msg = ''
+    try {
+      readBaseline(p)
+    } catch (e) {
+      msg = e instanceof Error ? e.message : String(e)
+    }
+    // review first, without --baseline, or regeneration silently swallows new findings
+    expect(msg).toMatch(/audit --fail-on error/)
+    expect(msg).toMatch(/without --baseline|no --baseline/i)
+    // then regenerate
+    expect(msg).toMatch(/apiwatch baseline/)
+    // and stop this recurring: a floating range upgrades you without asking
+    expect(msg).toMatch(/pin/i)
+    // the review step must come before the regenerate step, not merely be present
+    expect(msg.indexOf('audit --fail-on error')).toBeLessThan(msg.indexOf('apiwatch baseline'))
+  })
+
   it('rejects a baseline recorded against a different root', () => {
     const p = tmp()
     writeBaseline(p, [finding()], '0.3.0', { root: 'packages/api', includeNonShipping: false })

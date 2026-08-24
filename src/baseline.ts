@@ -164,7 +164,19 @@ export function readBaseline(path: string, expect?: BaselineOptions): Baseline {
   if (b?.version !== 1) throw new BaselineError(`unsupported baseline version: ${b?.version}`)
   if (b.fingerprintVersion !== FP_VERSION)
     throw new BaselineError(
-      `baseline fingerprintVersion ${b.fingerprintVersion} does not match this apiwatch (${FP_VERSION}); regenerate it with \`apiwatch baseline\``,
+      // Naming `apiwatch baseline` alone was not enough. Regenerating accepts every finding
+      // currently visible, including new error-severity ones, and reports only a count, so a
+      // user who runs it first never sees what they just accepted. And the bump itself usually
+      // arrives unrequested: a workflow on a floating range such as `npx apiwatch@0.3` moves to
+      // a new version the moment one publishes, so CI goes red with no change on their side.
+      // Both the order and the pin belong here, because this is thrown in CI where nobody can
+      // experiment.
+      `baseline fingerprintVersion ${b.fingerprintVersion} does not match this apiwatch (${FP_VERSION}), so every entry is stale.\n` +
+        '  1. review first, without --baseline, so nothing is hidden:  apiwatch audit --fail-on error\n' +
+        `  2. then regenerate over the stale file:                     apiwatch baseline --out ${path}\n` +
+        '  then commit the new baseline.\n' +
+        '  Pin an exact apiwatch version in CI (apiwatch@x.y.z, not @x.y) so a future bump is a\n' +
+        '  change you choose rather than one you discover.',
     )
   if (!Array.isArray(b.accepted)) throw new BaselineError('baseline is malformed: no accepted[]')
   // `count` is load-bearing arithmetic now that accept takes a max and prune takes a min, not
