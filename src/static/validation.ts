@@ -37,9 +37,14 @@ export function isResponseValidated(call: CallExpression): boolean | 'unknown' {
   const imports = collectFileImports(sf)
   const hasValidatorLib = imports.some((i) => VALIDATOR_LIBS.includes(i))
 
+  // FunctionExpression belongs here with the rest. `const handler = function (req, res) { … }`
+  // is an ordinary function scope, and omitting it meant a call inside one found no enclosing
+  // scope at all and abstained, even with the validator call right beside it. The arrow spelling
+  // of the identical code worked, which is the giveaway that this was an oversight.
   const fn = call.getFirstAncestor(
     (a) =>
       a.getKind() === SyntaxKind.FunctionDeclaration ||
+      a.getKind() === SyntaxKind.FunctionExpression ||
       a.getKind() === SyntaxKind.ArrowFunction ||
       a.getKind() === SyntaxKind.MethodDeclaration,
   )

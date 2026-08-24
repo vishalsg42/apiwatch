@@ -12,10 +12,23 @@ const hostOf = (u: string) => {
 export function classifyUrl(arg: Node | undefined): UrlExpr {
   if (!arg) return { kind: 'unknown' }
   const text = arg.getText()
-  if (arg.getKind() === SyntaxKind.StringLiteral || /^['"]/.test(text)) {
-    const url = text.slice(1, -1)
-    const host = hostOf(url)
-    return host ? { kind: 'literal', url, host } : { kind: 'variable', expr: text }
+  const kind = arg.getKind()
+  // A no-substitution template is a string with different quotes. It has no dynamic part, so it
+  // is read whole; the prefix-only path below exists for templates that DO interpolate, where
+  // everything after the first `${` is unknowable. Reading them alike dropped the path of
+  // `` `https://api.host.dev/v3/users` `` down to the origin.
+  const literalText =
+    kind === SyntaxKind.StringLiteral ||
+    kind === SyntaxKind.NoSubstitutionTemplateLiteral ||
+    /^['"]/.test(text)
+      ? text.slice(1, -1)
+      : undefined
+  if (literalText !== undefined) {
+    const host = hostOf(literalText)
+    if (host) return { kind: 'literal', url: literalText, host }
+    // A path-only literal is still statically known, just origin-relative.
+    if (literalText.startsWith('/')) return { kind: 'relative', url: literalText }
+    return { kind: 'variable', expr: text }
   }
   if (text.startsWith('`')) {
     const m = /^`(https?:\/\/[^$`/]+)/.exec(text)

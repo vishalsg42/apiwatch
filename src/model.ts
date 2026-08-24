@@ -10,6 +10,13 @@ export type ClientKind =
 
 export type UrlExpr =
   | { kind: 'literal'; url: string; host: string }
+  /**
+   * A literal path with no host: `'/api/v1/checkout'`. Statically known, so calling it
+   * 'variable' was wrong twice over: it inflated the unresolved-host count and made the report
+   * say the url was built at runtime, of a string sitting at the call site. It has no host,
+   * which is a different fact and the one worth stating.
+   */
+  | { kind: 'relative'; url: string }
   | { kind: 'config'; expr: string }
   | { kind: 'env'; expr: string }
   | { kind: 'variable'; expr: string }

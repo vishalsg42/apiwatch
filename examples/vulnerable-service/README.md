@@ -63,16 +63,13 @@ against the code in this directory:
   src/services/legacy-billing.js:6  host `api.payments.example` is hardcoded in source
   src/services/notifications.js:6  no schema validation seen for this response
   src/services/notifications.js:6  host `api.notifications.example` is hardcoded in source
-
-  hosts unresolved for 1 call sites (urls are built at runtime, so static analysis cannot see them)
 ```
 
 Four call sites were analysed: `inventory.js`, `legacy-billing.js`, `notifications.js`, and
 `payments.js`. Three of them show up above, each flagged by multiple rules. The fourth, the
-`paymentsClient.post('/charges', payload)` call in `payments.js`, is exactly accounted for in
-the "hosts unresolved for 1 call sites" line (its URL is a relative path built from
-`axios.create({ baseURL })`, which apiwatch can't statically resolve to a literal host), but it
-does not appear in a single finding. `no-timeout` stays silent because the client instance was
+`paymentsClient.post('/charges', payload)` call in `payments.js`, does not appear in a single
+finding. Its URL is a relative path against the `baseURL` its client instance was created with,
+so it has no host of its own to report, which is why `hardcoded-host` passes over it. `no-timeout` stays silent because the client instance was
 created with `timeout: 5000`. `no-retry` stays silent because `axios-retry` is wired onto that
 same instance. `unvalidated-response` stays silent because the response is parsed through
 `ChargeSchema.parse(...)` before it's returned. That is the difference between a call apiwatch

@@ -274,8 +274,24 @@ type ConfigArg =
   | { kind: 'unreadable' } // something else at the expected index: Identifier, spread, call, ...
   | { kind: 'absent' } // no argument at the expected index at all, or no expected index
 
+/**
+ * axios's own two-overload shapes, which are ambiguous for exactly the reason the request family
+ * is: `axios(config)` and `axios.request(config)` put options first, while `axios(url, config)`
+ * and `axios.request(url, config)` put them second. Both are documented axios API. A fixed index
+ * of 0 read `axios.request(url, { timeout: 5000 })` as unreadable and reported the call as
+ * having no statically known timeout, on a call that plainly sets one.
+ *
+ * Only these two. The verb methods stay on exact indices, because an object literal at a fixed
+ * index there can be a request BODY (`axios.post(url, data)`), and probing by shape would read
+ * a domain field named `timeout` or `retry` out of the body.
+ */
+const axiosShapeProbed = (m: string | undefined) => m === undefined || m === 'request'
+
 function configArg(call: CallExpression, binding: ClientBinding): ConfigArg {
   if (SHAPE_PROBED.has(binding.kind)) return probeConfigArg(call)
+  const method = methodOf(call)
+  if ((binding.kind === 'axios' || binding.kind === 'nestjs-axios') && axiosShapeProbed(method))
+    return probeConfigArg(call)
   const idx = configArgIndex(binding.kind, methodOf(call))
   if (idx === undefined) return { kind: 'absent' }
   const arg = call.getArguments()[idx]

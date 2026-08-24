@@ -19,6 +19,7 @@ import {
   type SetAccessorDeclaration,
   type SourceFile,
   SyntaxKind,
+  type VariableDeclaration,
 } from 'ts-morph'
 import type { CallSite, ClientBinding, Workspace } from '../model.js'
 import { collectFileImports } from './imports.js'
@@ -83,6 +84,31 @@ function paramDeclaresFetch(p: ParameterDeclaration): boolean {
  * ancestors and decide, purely syntactically, whether a particular `fetch(...)` call is
  * locally shadowed.
  */
+/**
+ * The names a variable declaration binds, flattened through destructuring.
+ *
+ * `const fetch = x` binds `fetch`; `const { fetch } = x` and `const [fetch] = xs` bind it too,
+ * and so do the renaming and nested forms (`{ a: fetch }`, `{ a: { fetch } }`). A source-text
+ * comparison sees none of them, which is what made a locally destructured wrapper read as the
+ * global.
+ */
+function bindsName(nameNode: Node, want: string): boolean {
+  const k = nameNode.getKind()
+  if (k === SyntaxKind.Identifier) return nameNode.getText() === want
+  if (k === SyntaxKind.ObjectBindingPattern || k === SyntaxKind.ArrayBindingPattern)
+    return nameNode
+      .asKindOrThrow(k)
+      .getElements()
+      .some((el) => {
+        const n = el.asKind(SyntaxKind.BindingElement)?.getNameNode()
+        return n ? bindsName(n, want) : false
+      })
+  return false
+}
+
+const declarationBindsFetch = (d: VariableDeclaration): boolean =>
+  bindsName(d.getNameNode(), 'fetch')
+
 function declaresFetch(node: Node): boolean {
   const kind = node.getKind()
   if (FN_LIKE_KINDS.has(kind)) {
@@ -103,12 +129,18 @@ function declaresFetch(node: Node): boolean {
   }
   if (kind === SyntaxKind.Block || kind === SyntaxKind.SourceFile) {
     const scope = node as Block | SourceFile
-    if (scope.getVariableDeclarations().some((d) => d.getName() === 'fetch')) return true
+    // getName() returns the WHOLE pattern for a destructured declaration: `const { fetch } = x`
+    // yields "{ fetch }" and `const [fetch] = xs` yields "[fetch]", so an equality test against
+    // 'fetch' never matched and the call was then asserted to be native fetch. That is an
+    // error-severity false positive on code that is genuinely wrapped. Compare against the names
+    // the declaration actually BINDS instead of its source text.
+    if (scope.getVariableDeclarations().some(declarationBindsFetch)) return true
     if (scope.getFunctions().some((f) => f.getName() === 'fetch')) return true
   }
   if (kind === SyntaxKind.CatchClause) {
     const cc = node as CatchClause
-    if (cc.getVariableDeclaration()?.getName() === 'fetch') return true
+    const cv = cc.getVariableDeclaration()
+    if (cv && bindsName(cv.getNameNode(), 'fetch')) return true
   }
   return false
 }
