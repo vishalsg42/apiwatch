@@ -31,9 +31,15 @@ describe('resolveOptions', () => {
     expect((await siteAt('call-shorthand-timeout', 'svc.ts', /axios\.get/)).options.timeoutMs).toBe(
       'instance-default',
     ))
-  it('treats a shorthand retry as library-handled', async () =>
+  // A shorthand key proves PRESENCE even though its value is unreadable, but only for a client
+  // that implements the option. On got it does; on axios `retry` is not a config key at all, so
+  // the same shape proves nothing. This assertion used to read 'library' for the axios case,
+  // which is the defect issue #5 describes: an inert key silently suppressing a real finding.
+  it('treats a shorthand retry as library-handled on got, which implements it', async () =>
+    expect((await siteAt('got-shorthand-retry', 'svc.ts', /got\(/)).options.retry).toBe('library'))
+  it('does NOT treat a shorthand retry as library-handled on axios, which does not', async () =>
     expect((await siteAt('call-shorthand-retry', 'svc.ts', /axios\.get/)).options.retry).toBe(
-      'library',
+      'none',
     ))
   // Was "detects a CommonJS require of a retry library", pinning a file-wide heuristic that
   // marked EVERY call in a file as retried the moment the file imported a retry library

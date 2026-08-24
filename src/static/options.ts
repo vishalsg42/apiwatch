@@ -1,5 +1,5 @@
 import { type CallExpression, type Node, SyntaxKind } from 'ts-morph'
-import type { CallOptions, ClientBinding } from '../model.js'
+import type { CallOptions, ClientBinding, ClientKind } from '../model.js'
 
 /**
  * Looks up an object literal's OWN top-level property by name, accepting both a regular
@@ -84,8 +84,34 @@ const analyseSpreads = (n: Node): { opaque: boolean; extra: Node[] } => {
 }
 
 type PropLookup = { shorthand: true } | { shorthand: false; initializer: Node }
+
+/**
+ * A property's key with any quotes removed. `{ "timeout": 5000 }` and `{ timeout: 5000 }` are the
+ * same object, and quoting is mandatory for a key that is not a valid identifier, such as
+ * axios-retry's `'axios-retry'`.
+ *
+ * ts-morph's getProperty(name) matches the RAW name text, so it missed every quoted key and read
+ * the value as proven absent. Since no-timeout is the only rule at `error`, that failed builds on
+ * correctly-protected code. See issue #13.
+ */
+const keyOfProp = (p: Node): string | undefined => {
+  const named =
+    p.asKind(SyntaxKind.PropertyAssignment) ?? p.asKind(SyntaxKind.ShorthandPropertyAssignment)
+  const node = named?.getNameNode()
+  if (!node) return undefined
+  const k = node.getKind()
+  if (k === SyntaxKind.StringLiteral || k === SyntaxKind.NoSubstitutionTemplateLiteral)
+    return node.asKindOrThrow(k).getLiteralText()
+  // A computed key (`{ [k]: v }`) is not statically a name, so it matches nothing by design.
+  if (k === SyntaxKind.ComputedPropertyName) return undefined
+  return node.getText()
+}
+
 const prop = (n: Node, name: string): PropLookup | undefined => {
-  const p = n.asKind(SyntaxKind.ObjectLiteralExpression)?.getProperty(name)
+  const p = n
+    .asKind(SyntaxKind.ObjectLiteralExpression)
+    ?.getProperties()
+    .find((x) => keyOfProp(x) === name)
   if (!p) return undefined
   if (p.getKind() === SyntaxKind.ShorthandPropertyAssignment) return { shorthand: true }
   const init = p.asKind(SyntaxKind.PropertyAssignment)?.getInitializer()
@@ -288,6 +314,36 @@ function isInManualRetryLoop(call: CallExpression): boolean {
 }
 
 /**
+ * The config keys that PROVE retry, per client. A key only proves anything if the client it is
+ * handed to actually implements it.
+ *
+ * `retry`/`retries` used to count for every client. Only got has such an option:
+ * `AxiosRequestConfig` declares no `retry` key and neither does `RequestInit`, so
+ * `axios.get(url, { retry: 3 })` is inert, the call is never re-attempted, and reading it as
+ * proof silently suppressed a real finding. Found by a blind judge qualification set, where two
+ * reviewers asked only "does anything re-attempt this" both said no and were right. See #5.
+ *
+ * axios's entry is `axios-retry`, which is the literal per-request key axios-retry reads
+ * (`{ 'axios-retry': { retries: 3 } }`). Instance-level `axiosRetry(instance, ...)` is a
+ * different path and is already handled by `binding.instanceRetry`.
+ *
+ * An empty list means no request-level option can prove retry for that client. It does not mean
+ * such calls never retry: a wrapper or an interceptor still can, which is why the verdict there
+ * is a reported finding rather than a claim of certainty.
+ */
+const RETRY_OPTION_NAMES: Record<ClientKind, readonly string[]> = {
+  // got v11+ uses `retry: { limit }`; got v9 used `retries`. Both are genuine.
+  got: ['retry', 'retries'],
+  axios: ['axios-retry'],
+  'nestjs-axios': ['axios-retry'],
+  fetch: [],
+  'node-fetch': [],
+  request: [],
+  'request-promise': [],
+  'node:http': [],
+}
+
+/**
  * Whether a `retry`/`retries` option explicitly DISABLES retry. got retries twice by default,
  * so a got call is trusted as retrying; but `got(url, { retry: { limit: 0 } })` turns that off
  * and the call then has no retry at all. Reading only the client kind reported those calls as
@@ -296,9 +352,9 @@ function isInManualRetryLoop(call: CallExpression): boolean {
  * Only a literal 0 or `false` counts as disabled. A value that cannot be read statically is not
  * proof of anything, so it leaves the existing verdict alone.
  */
-function retryExplicitlyDisabled(config: Node | undefined): boolean {
+function retryExplicitlyDisabled(config: Node | undefined, names: readonly string[]): boolean {
   if (!config) return false
-  for (const name of ['retry', 'retries']) {
+  for (const name of names) {
     const found = prop(config, name)
     if (!found || found.shorthand) continue
     const init = found.initializer
@@ -307,7 +363,11 @@ function retryExplicitlyDisabled(config: Node | undefined): boolean {
     if (init.getKind() === SyntaxKind.ObjectLiteralExpression) {
       const inner = init.asKindOrThrow(SyntaxKind.ObjectLiteralExpression)
       for (const key of ['limit', 'retries', 'maxRetries', 'attempts']) {
-        const ip = inner.getProperty(key)?.asKind(SyntaxKind.PropertyAssignment)?.getInitializer()
+        const ip = inner
+          .getProperties()
+          .find((x) => keyOfProp(x) === key)
+          ?.asKind(SyntaxKind.PropertyAssignment)
+          ?.getInitializer()
         if (ip && ip.getKind() === SyntaxKind.NumericLiteral && Number(ip.getText()) === 0)
           return true
       }
@@ -410,7 +470,10 @@ export function resolveOptions(
       : arg.kind === 'unreadable'
         ? 'unreadable'
         : 'absent'
-  if (retry === 'none' && config && (lookup('retry') || lookup('retries'))) {
+  const retryNames = RETRY_OPTION_NAMES[binding.kind]
+  // An explicit, readable key wins over a client default: `got(url, { retry: { limit: 3 } })` is
+  // 'explicit', not 'client-default', because the call said so rather than inheriting it.
+  if (retry !== 'unknown' && config && retryNames.some((n) => lookup(n))) {
     retry = 'library'
     retryReason = 'explicit'
   }
@@ -421,7 +484,7 @@ export function resolveOptions(
   }
   // An explicit `retry: 0` / `retry: { limit: 0 }` overrides both the client-kind default and
   // the presence check above: the call was deliberately configured NOT to retry.
-  if (retry === 'library' && retryExplicitlyDisabled(config)) {
+  if (retry === 'library' && retryExplicitlyDisabled(config, retryNames)) {
     // Behind a spread the disable is readable but absence still is not, so the verdict stays
     // 'unknown' and the reason names the spread, not the disable, which is what made it unprovable.
     retry = opaque ? 'unknown' : 'none'

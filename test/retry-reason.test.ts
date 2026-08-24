@@ -26,6 +26,8 @@ describe('retryReason', () => {
     expect(await reasonOf('reason-disabled.ts')).toEqual({ retry: 'none', reason: 'disabled' }))
 
   // The two routes to a proven PRESENCE.
+  // On got, where `retry` is a real option. The fixture's axios twin is covered by
+  // retry-option-names.test.ts, which asserts the same shape proves nothing there.
   it('names a retry key read off this call', async () =>
     expect(await reasonOf('reason-explicit.ts')).toEqual({ retry: 'library', reason: 'explicit' }))
 
