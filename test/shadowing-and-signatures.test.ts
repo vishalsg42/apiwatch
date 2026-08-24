@@ -64,6 +64,7 @@ describe('a locally destructured fetch is not the global', () => {
   // equally serious.
   it('still sees a genuine bare global fetch', async () => {
     const r = await audit({ 'a.ts': "export const f = () => fetch('https://v.dev/a')" })
+    expect(r.sites).toHaveLength(1)
     expect(r.findings.filter((f) => f.rule === 'no-timeout')).toHaveLength(1)
   })
 })
@@ -136,5 +137,69 @@ describe('url classification', () => {
       ].join('\n'),
     })
     expect(r.sites[0]?.url.kind).not.toBe('variable')
+  })
+})
+
+/**
+ * A class property is registered under its bare name, because that is what the property is
+ * called, but every reference to it inside the class reads `this.api`. Call-site resolution
+ * stripped that prefix; the three binding lookups in clients.ts did not. So
+ * `axiosRetry(this.api, { retries: 3 })` found no binding, left instanceRetry false, and every
+ * `this.api.get(...)` afterwards reported a false no-retry. The identical wiring written without
+ * `this.` worked, which is what marks it an asymmetry rather than a policy.
+ *
+ * Fixed with one shared helper used by every lookup, so the two halves cannot drift again. The
+ * derivation cases below were broken by the same asymmetry and nothing had reported them.
+ */
+describe('a client held on a class property', () => {
+  it('has axios-retry attached through this.', async () => {
+    const r = await audit({
+      'a.ts': [
+        "import axios from 'axios'",
+        "import axiosRetry from 'axios-retry'",
+        'export class Service {',
+        '  private api = axios.create({ timeout: 5000 })',
+        '  constructor() { axiosRetry(this.api, { retries: 3 }) }',
+        "  getUsers() { return this.api.get('https://v.dev/users') }",
+        '}',
+      ].join('\n'),
+    })
+    expect(r.sites).toHaveLength(1) // the guard: no vacuous pass
+    expect(r.sites[0]?.options.retry).toBe('library')
+    expect(r.findings.filter((f) => f.rule === 'no-retry')).toEqual([])
+  })
+
+  // A factory reached through `this.` exercises the second lookup that was missing the prefix.
+  // Every assertion here is guarded by a call-site count first: an earlier version of this test
+  // passed because the class produced ZERO call sites, so it asserted the absence of findings in
+  // a file apiwatch had not analysed at all. Silence is not a pass.
+  it('resolves a client held on a class property at all', async () => {
+    const r = await audit({
+      'a.ts': [
+        "import axios from 'axios'",
+        'export class Service {',
+        '  private api = axios.create({ timeout: 5000 })',
+        "  getUsers() { return this.api.get('https://v.dev/users') }",
+        '}',
+      ].join('\n'),
+    })
+    expect(r.sites).toHaveLength(1) // the guard: no vacuous pass
+    expect(r.sites[0]?.options.timeoutMs).toBe('instance-default')
+  })
+
+  // The control: the prefix must not become a blanket excuse. A property that is NOT a client
+  // still resolves to nothing, and a genuinely unprotected call on a real client still fires.
+  it('still reports a real missing timeout on a class-held client', async () => {
+    const r = await audit({
+      'a.ts': [
+        "import axios from 'axios'",
+        'export class Service {',
+        '  private api = axios.create({})',
+        "  getUsers() { return this.api.get('https://v.dev/users') }",
+        '}',
+      ].join('\n'),
+    })
+    expect(r.sites).toHaveLength(1)
+    expect(r.findings.filter((f) => f.rule === 'no-timeout')).toHaveLength(1)
   })
 })

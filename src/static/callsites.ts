@@ -22,6 +22,7 @@ import {
   type VariableDeclaration,
 } from 'ts-morph'
 import type { CallSite, ClientBinding, Workspace } from '../model.js'
+import { bindingNameOf } from './clients.js'
 import { collectFileImports } from './imports.js'
 import { configMethod, isCallbackArg, resolveOptions } from './options.js'
 import { classifyUrl } from './urls.js'
@@ -356,7 +357,7 @@ export function findCallSites(
       if (!METHODS.has(name)) continue // excludes .create(), .interceptors, …
       method = name === 'del' ? 'delete' : name
       const head = pa.getExpression().getText()
-      binding = head.startsWith('this.') ? head.slice(5) : head
+      binding = bindingNameOf(head)
     } else continue
 
     let b: ClientBinding | undefined

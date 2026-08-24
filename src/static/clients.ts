@@ -134,9 +134,9 @@ function deriveFromCreate(
   if (callee.getKind() === SyntaxKind.PropertyAccessExpression) {
     const pae = callee as PropertyAccessExpression
     if (!FACTORY_METHODS.has(pae.getName())) return undefined
-    base = out.get(pae.getExpression().getText())
+    base = out.get(bindingNameOf(pae.getExpression().getText()))
   } else if (callee.getKind() === SyntaxKind.Identifier) {
-    const candidate = out.get(callee.getText())
+    const candidate = out.get(bindingNameOf(callee.getText()))
     if (candidate?.origin !== 'factory') return undefined
     base = candidate
   }
@@ -276,6 +276,21 @@ function requireShape(init: Node): { specifier: string; property?: string } | un
   return undefined
 }
 
+/**
+ * The local binding name a source-text reference resolves to.
+ *
+ * A class property is registered under its bare name (`api`), because that is what the property
+ * declaration is called, but every reference to it in the class reads `this.api`. Call-site
+ * resolution already stripped the prefix; the three lookups in this file did not, so
+ * `axiosRetry(this.api, { retries: 3 })` found no binding and left instanceRetry false, and every
+ * `this.api.get(...)` afterwards reported a false no-retry. The same asymmetry silently broke
+ * `this.api.create(...)` derivation.
+ *
+ * One helper for every lookup, so the two halves cannot drift apart again.
+ */
+export const bindingNameOf = (text: string): string =>
+  text.startsWith('this.') ? text.slice(5) : text
+
 export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   const out = new Map<string, ClientBinding>()
 
@@ -376,7 +391,7 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
     const e = c.getExpression()
     if (!/axiosRetry|axios_retry|rax\.attach/.test(e.getText())) continue
     const target = c.getArguments()[0]?.getText()
-    const b = target && out.get(target)
+    const b = target && out.get(bindingNameOf(target))
     if (b) b.instanceRetry = true
   }
 
