@@ -7,6 +7,122 @@ apiwatch is pre-1.0, so minor versions may change behaviour. Each entry says whe
 more findings or fewer after upgrading, because a change in finding count is otherwise
 indistinguishable from a regression.
 
+## 0.4.0 (2026-08-25)
+
+**This release ADDS findings.** `fingerprintVersion` stays at 2, so no baseline needs
+regenerating, but calls that were previously invisible or wrongly abstained on now report, and
+`--fail-on error` can newly fail on code you have not changed. Review before upgrading:
+
+```bash
+apiwatch audit --fail-on error                     # no --baseline: see everything, new included
+apiwatch baseline accept                           # take the ones you are accepting
+```
+
+Sixteen defects, found by three rounds of external review and by sweeping for each defect's
+siblings rather than patching the reported line. Seven were `error`-severity false positives:
+findings against code that was correctly protected, which is the failure that fails builds and the
+one this project treats as most serious.
+
+### Measured against 0.3.8
+
+Nine public repositories, both binaries installed from packed tarballs so a rebuild could not
+change what was being compared: **939 findings before, 950 after. Nothing removed, eleven added.**
+
+| repo | added | severity |
+|---|---|---|
+| Ghost | 5 `unvalidated-response` | `info`, cannot fail a build |
+| nocodb | 3 `no-timeout`, 3 `no-retry` | **`error` and `warn`** |
+| payload, strapi, medusa, tinacms, documenso, uptime-kuma, outline | none | |
+
+Every addition was checked by hand. The nocodb ones are `axios(url, {...})` calls whose config was
+previously located by a guessed index and read as unreadable; the flagged file sets no timeout
+anywhere. The Ghost ones are calls inside a classic `function () {}` that previously found no
+enclosing scope at all and abstained rather than reporting.
+
+Unresolved-host counts fall in five of the nine, which is the relative-path fix making that number
+mean what its message says.
+
+### The structural change
+
+The config reader used to skip any property it did not recognise, then treat a missing `timeout`
+as PROOF of absence. Every syntactic form nobody had anticipated therefore became an
+error-severity false positive: a quoted key, a computed key, a getter. Nine of this project's
+defects lived in that one behaviour, and each had been fixed by teaching the reader one more
+shape, which cannot terminate.
+
+The reader now classifies **every** property, with no silent skip and no shrugging default. A
+property kind it cannot name makes the object opaque, exactly as an unreadable spread already did,
+and opaque means abstain. The gaps are still unbounded and always will be. What changed is the
+direction they fail in: an unreadable shape now produces silence, which is the documented
+contract, rather than failing somebody's build.
+
+### Fixed: findings that should never have fired
+
+- A **quoted config key** was invisible, so `{ "timeout": 5000 }` reported `no-timeout` on a
+  protected call. Property names are compared with quotes stripped now, which is also what makes
+  hyphenated keys reachable.
+- A **locally destructured `fetch`** did not count as shadowing, in any of its forms:
+  `const { fetch } = ctx`, `const [fetch] = list`, `const { fetch } = require('./wrapper')`, and a
+  nested or renamed parameter such as `({ deps: { fetch } }) =>`. A wrapper that set
+  `AbortSignal.timeout(5000)` was reported as an unprotected native `fetch`.
+- **A signal behind a falsy timeout.** `{ timeout: 0, signal: AbortSignal.timeout(5000) }` is a
+  real pattern: switch off the client's own timeout and let the signal govern. The signal was only
+  read when no `timeout` key existed at all. `timeout: 0` alone still fires, because that genuinely
+  is no deadline.
+- **`axiosRetry(this.api, …)`** attached to nothing, because a class property is registered under
+  its bare name while every reference inside the class reads `this.api`. Call sites already stripped
+  that prefix; the three lookups that register clients did not. One shared helper serves all of
+  them now.
+- A **computed key or getter** (`{ [KEY]: 5000 }`, `{ get timeout() {…} }`) was skipped and the
+  timeout read as proven absent. Covered by the structural change above.
+
+### Fixed: calls that were silently invisible
+
+- **`export default` clients.** A client shared by `export default axios.create({…})` or
+  `export default client` resolved to nothing in every consumer: zero call sites, no diagnostic, no
+  counter. That is the most common way to share a configured client.
+- **A backtick `require`.** Two readers matched source text with a regex assuming quotes and no
+  whitespace, so `require(`./http`)` was missed. In one that meant a validated response reported as
+  unvalidated; in the other a cross-module client vanished and its whole consumer file produced no
+  call sites. Both read the AST now.
+- **A `retry` key on a client that has no such option.** `axios.get(url, { retry: 3 })` is inert,
+  because `AxiosRequestConfig` declares no `retry` key, and reading it as proof suppressed a real
+  finding. The option names are per client now, with axios mapped to `axios-retry`'s actual
+  per-request key.
+- **`axios.request(url, config)`**, documented axios API alongside `axios.request(config)`, had its
+  config located by a fixed index and read as unreadable. Both ambiguous axios shapes use the same
+  shape probe the request family already used.
+- **A call inside a classic `function (req, res) {}`** found no enclosing scope, so validation
+  abstained even with the validator beside it. The arrow spelling of identical code worked.
+
+### Fixed: what the report says
+
+- A **no-substitution template literal** kept only its origin, so `` `https://api.host/v3/users` ``
+  lost its path. It is read whole now; the prefix-only path is for templates that interpolate.
+- A **relative literal** such as `'/api/v1/checkout'` was classified as a runtime-built url, which
+  made the report claim static analysis could not see a string sitting at the call site. It has its
+  own kind now, and is excluded from the unresolved-host count so that line stays true.
+- **`--root=value`**, the GNU attached form that CI scripts produce, was rejected as an unknown
+  flag. Normalised once at the CLI entry.
+- **`--out` into a directory that does not exist** reported an ENOENT naming a temp file the user
+  never asked for. The directory is created.
+
+### Checked and deliberately not changed
+
+Three reported defects did not survive verification, and acting on any of them would have made
+apiwatch worse:
+
+- `NO_COLOR` handling was called non-compliant. [no-color.org](https://no-color.org/) requires
+  "present and not an empty string", and the current code agrees on every case including
+  `NO_COLOR="0"`, where the string is truthy in JavaScript and colour is correctly disabled. The
+  proposed rewrite would have broken the empty-string case.
+- The `legacy-client` version parser was said to skip pnpm `catalog:` and `workspace:` specifiers.
+  The proposed replacement returns identical values on all nine specifiers tested, including
+  `workspace:^2.0.0`. A bare `catalog:` yields no version either way, which is right: it is defined
+  in another file and firing would be a guess.
+- A missing `BindingElement` in one shadow check does not reproduce; a file-scope
+  `const { fetch } = ctx` is already caught by the call-site ancestor walk.
+
 ## 0.3.8 (2026-08-24)
 
 **No findings change and no baseline needs regenerating.** `fingerprintVersion` stays at 2.
