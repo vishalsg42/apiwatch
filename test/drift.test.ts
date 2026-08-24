@@ -133,6 +133,10 @@ describe('partial analysis is never silently compared', () => {
       const r = await makeBaseline(dir)
       expect(r.code).toBe(2)
       expect(r.out).toMatch(/refusing to write a baseline/)
+      // What could not be read here is a directory, not a file. The count is seeded from
+      // unreadableDirs, so the message must not call it a file.
+      expect(r.out).toMatch(/1 path\(s\) could not be analysed/)
+      expect(r.out).not.toMatch(/file\(s\)/)
     } finally {
       chmodSync(secret, 0o755)
     }
@@ -152,6 +156,8 @@ describe('partial analysis is never silently compared', () => {
       const r = await audit(dir, '--fail-on', 'error')
       expect(r.code).toBe(2)
       expect(r.out).toMatch(/refusing to compare a partial run/)
+      expect(r.out).toMatch(/1 path\(s\) could not be analysed/)
+      expect(r.out).not.toMatch(/file\(s\)/)
     } finally {
       chmodSync(secret, 0o755)
     }

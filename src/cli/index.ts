@@ -194,7 +194,7 @@ async function runBaseline(argv: string[], io: CliIo): Promise<number> {
   }
   if (result.model.filesSkipped > 0 && !allowPartial) {
     io.write(
-      `apiwatch: ${result.model.filesSkipped} file(s) could not be analysed; refusing to write a baseline from a partial run (use --allow-partial to override)\n`,
+      `apiwatch: ${result.model.filesSkipped} path(s) could not be analysed; refusing to write a baseline from a partial run (use --allow-partial to override)\n`,
     )
     return 2
   }
@@ -361,7 +361,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
     // repo nobody fully looked at.
     if (baseline && result.model.filesSkipped > 0) {
       io.write(
-        `apiwatch: ${result.model.filesSkipped} file(s) could not be analysed; refusing to compare a partial run against a baseline\n`,
+        `apiwatch: ${result.model.filesSkipped} path(s) could not be analysed; refusing to compare a partial run against a baseline\n`,
       )
       return 2
     }

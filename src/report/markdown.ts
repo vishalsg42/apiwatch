@@ -5,8 +5,12 @@ const DETAIL_CAP = 50
 export function renderMarkdown(m: ReportModel): string {
   const L: string[] = []
   L.push('# apiwatch audit', '')
+  // Math.max because filesSkipped is seeded from unreadableDirs, whose files were never
+  // enumerated into filesAnalysed, so the difference can go negative on a partial run. Clamping
+  // the DISPLAY only: filesSkipped itself gates the fail-closed baseline guards in cli/index.ts
+  // and must keep its real value.
   L.push(
-    `analysed ${m.filesAnalysed - m.filesSkipped} of ${m.filesAnalysed} files · ` +
+    `analysed ${Math.max(0, m.filesAnalysed - m.filesSkipped)} of ${m.filesAnalysed} files · ` +
       `${m.callSiteCount} outbound call sites`,
   )
   // Mirror renderTty: a suppression the reader cannot see is indistinguishable from a rule that

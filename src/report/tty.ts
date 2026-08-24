@@ -7,8 +7,12 @@ const DETAIL_CAP = 50
 
 export function renderTty(m: ReportModel): string {
   const L: string[] = ['']
+  // Math.max because filesSkipped is seeded from unreadableDirs, whose files were never
+  // enumerated into filesAnalysed, so the difference can go negative on a partial run. Clamping
+  // the DISPLAY only: filesSkipped itself gates the fail-closed baseline guards in cli/index.ts
+  // and must keep its real value.
   L.push(
-    `  analysed ${m.filesAnalysed - m.filesSkipped} of ${m.filesAnalysed} files · ` +
+    `  analysed ${Math.max(0, m.filesAnalysed - m.filesSkipped)} of ${m.filesAnalysed} files · ` +
       `${m.callSiteCount} outbound call sites`,
   )
   // Say what was left out. An exclusion the reader cannot see is indistinguishable from a
@@ -47,8 +51,15 @@ export function renderTty(m: ReportModel): string {
   L.push('')
   for (const f of m.findings.slice(0, DETAIL_CAP))
     L.push(`  ${c('36', `${f.file}:${f.line}`)}  ${f.message}`)
+  // --json, not .apiwatch/audit.md. That file is written only under --write-report, so this line
+  // used to name a path that usually does not exist; and even when it does, the Markdown report
+  // applies this same DETAIL_CAP and says the rest are not shown. renderJson has no cap, so it is
+  // the only output that can actually deliver what this line promises.
   if (m.findings.length > DETAIL_CAP)
-    L.push('', c('2', `  … and ${m.findings.length - DETAIL_CAP} more (see .apiwatch/audit.md)`))
+    L.push(
+      '',
+      c('2', `  … and ${m.findings.length - DETAIL_CAP} more (use --json to see all findings)`),
+    )
   if (m.unresolvedHostCount > 0)
     L.push(
       '',
