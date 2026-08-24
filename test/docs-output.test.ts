@@ -26,8 +26,12 @@ describe('documented output blocks', () => {
 
   // Outline cannot be cloned in CI, so guard the block structurally instead. Both of these
   // would have failed on the shipped README.
+  // The FULL block now lives in the case study; the README carries an abridged one. Both are
+  // checked, and differently: the full block must account for every finding, and the abridged one
+  // must be a genuine PREFIX of it. An excerpt that quietly edited a line would pass a
+  // "does it look right" check and fail this one.
   const outlineBlock = () =>
-    fenced(readFileSync(join(repoRoot, 'README.md'), 'utf8'), '  analysed 2144')
+    fenced(readFileSync(join(repoRoot, 'docs/case-study-outline.md'), 'utf8'), '  analysed 2144')
 
   it('the Outline block shows every finding its own summary counts', () => {
     const lines = outlineBlock()
@@ -47,5 +51,17 @@ describe('documented output blocks', () => {
       .split('\n')
       .filter((l) => l.trim())
     expect(lines[lines.length - 1]).toMatch(/hosts unresolved for \d+ call sites/)
+  })
+
+  it('the README excerpt is a real prefix of the full block, not a doctored one', () => {
+    const full = outlineBlock()
+      .split('\n')
+      .filter((l) => l.trim())
+    const excerpt = fenced(readFileSync(join(repoRoot, 'README.md'), 'utf8'), '  analysed 2144')
+      .split('\n')
+      .filter((l) => l.trim() && l.trim() !== '…')
+    expect(excerpt.length).toBeGreaterThan(3)
+    expect(excerpt.length).toBeLessThan(full.length) // it really is an excerpt
+    for (const [i, line] of excerpt.entries()) expect(line).toBe(full[i])
   })
 })
