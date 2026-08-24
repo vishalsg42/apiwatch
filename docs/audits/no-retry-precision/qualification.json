@@ -1,0 +1,83 @@
+[
+ {
+  "qid": "Q01",
+  "truth": "HAS_RETRY",
+  "fixture": "retry-wrapped",
+  "file": "src/svc.ts",
+  "line": 5,
+  "why": "axiosRetry(api,{retries:3}) binds retry to the same `api` instance the call uses"
+ },
+ {
+  "qid": "Q02",
+  "truth": "NO_RETRY",
+  "fixture": "p-retry-file-import",
+  "file": "src/svc.ts",
+  "line": 8,
+  "why": "TRAP: the file imports p-retry and wraps a DIFFERENT call; this one is bare"
+ },
+ {
+  "qid": "Q03",
+  "truth": "HAS_RETRY",
+  "fixture": "p-retry-file-import",
+  "file": "src/svc.ts",
+  "line": 7,
+  "why": "this call is the one actually wrapped in pRetry(...)"
+ },
+ {
+  "qid": "Q04",
+  "truth": "NO_RETRY",
+  "fixture": "axios-create-comment-retry",
+  "file": "src/svc.ts",
+  "line": 10,
+  "why": "TRAP: create() contains only a COMMENT mentioning retry, no option"
+ },
+ {
+  "qid": "Q05",
+  "truth": "NO_RETRY",
+  "fixture": "call-shorthand-retry",
+  "file": "src/svc.ts",
+  "line": 3,
+  "why": "CORRECTED after both judges independently answered NO_RETRY. The original key said HAS_RETRY, which was MY error, not theirs: AxiosRequestConfig declares no `retry` key (verified against axios/index.d.ts), so `{ retry }` passed to plain axios is inert and axios ignores it. axios-retry is configured either on the instance or under the literal key `axios-retry`, never `retry`. Corrected because the fact is checkable independently of any judge, not because two judges disagreed with me.",
+  "exposedDefect": "apiwatch reads any `retry`/`retries` key as proof of retry (options.ts:413) and resolves this call to retry='library', silently suppressing a genuine no-retry finding. Changes finding counts, so it ships in 0.3.7, not 0.3.6."
+ },
+ {
+  "qid": "Q06",
+  "truth": "NO_RETRY",
+  "fixture": "body-collision-retry",
+  "file": "src/svc.ts",
+  "line": 2,
+  "why": "TRAP: `retry: true` is a field of the POST BODY, not of a config object"
+ },
+ {
+  "qid": "Q07",
+  "truth": "HAS_RETRY",
+  "fixture": "retry-shapes",
+  "file": "src/retry-counter.ts",
+  "line": 6,
+  "why": "hand-rolled retry: attempt++ and continue on a 5xx, re-entering the while"
+ },
+ {
+  "qid": "Q08",
+  "truth": "NO_RETRY",
+  "fixture": "retry-shapes",
+  "file": "src/paginate-simple.ts",
+  "line": 6,
+  "why": "TRAP: a while loop, but it advances pages on SUCCESS; failure is not re-attempted"
+ },
+ {
+  "qid": "Q09",
+  "truth": "HAS_RETRY",
+  "fixture": "retry-shapes",
+  "file": "src/retry-catch-continue.ts",
+  "line": 4,
+  "why": "hand-rolled retry: catch continues, re-entering the for up to 3 times"
+ },
+ {
+  "qid": "Q10",
+  "truth": "NO_RETRY",
+  "fixture": "cjs-retry",
+  "file": "src/svc.js",
+  "line": 3,
+  "why": "TRAP: requires axios-retry but never calls it on anything; nothing is wired up"
+ }
+]

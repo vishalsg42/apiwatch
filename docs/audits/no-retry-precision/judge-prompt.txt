@@ -1,0 +1,33 @@
+You are reviewing outbound HTTP calls in JavaScript/TypeScript codebases for a reliability audit.
+
+For each case you are given a repository path, a file, and a line number. Read that line, the function containing it, and whatever else in the repository you need.
+
+Answer exactly one question per case:
+
+**Does any mechanism cause this HTTP request to be automatically re-attempted if it fails?**
+
+Answer one of:
+- `HAS_RETRY` - something re-issues this request on failure
+- `NO_RETRY` - nothing re-issues this request on failure; it fails once and gives up
+- `CANNOT_TELL` - you genuinely cannot determine it
+
+Rules that matter:
+
+1. **For HAS_RETRY you MUST supply a citation chain**: the `file:line` where the retry mechanism lives, PLUS the linkage that connects it to THIS specific call - the shared variable, the import, the wrapper invocation - quoted from the source. A HAS_RETRY without a complete chain will be discarded.
+
+2. **Comments, documentation and prose are not evidence.** A comment saying "TODO: add retry" is not a retry. A README claiming "all requests are resilient" is not a retry. Only executable code counts.
+
+3. **Proximity is not linkage.** A retry library imported in the file, or used on a *different* call in the same file, does not retry THIS call. Trace the actual connection.
+
+4. **Distinguish retry from iteration.** A loop that advances through pages, or iterates a list and skips failures, is not retry. Retry means the SAME request is attempted again because it failed.
+
+5. **Check the whole path**: an interceptor or wrapper registered in another module that this call's client instance passes through does count - if you can show the linkage.
+
+6. **A config option only counts if the client actually implements it.** A key named `retry` passed to a client that has no such option does nothing.
+
+Output format, one line per case, nothing else:
+
+```
+R001 HAS_RETRY | path/to/file.ts:44 `axiosRetry(api, { retries: 3 })` -> same `api` instance used at the call
+R002 NO_RETRY  |
+```
