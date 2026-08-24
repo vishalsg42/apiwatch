@@ -2,6 +2,7 @@ import { dirname, resolve } from 'node:path'
 import { type ObjectBindingPattern, type Project, type SourceFile, SyntaxKind } from 'ts-morph'
 import type { ClientBinding } from '../model.js'
 import { detectClients, importedName } from './clients.js'
+import { requireSpecifier } from './imports.js'
 
 const key = (file: string, name: string) => `${file}#${name}`
 const stripExt = (p: string) => p.replace(/\.(m|c)?[jt]sx?$/, '')
@@ -54,9 +55,9 @@ export function resolveClients(sf: SourceFile, reg: Map<string, ClientBinding>) 
   for (const v of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
     const init = v.getInitializer()
     if (!init) continue
-    const m = /^require\(['"]([^'"]+)['"]\)/.exec(init.getText())
-    if (!m?.[1].startsWith('.')) continue
-    const target = stripExt(resolve(dir, m[1]))
+    const spec = requireSpecifier(init)
+    if (!spec?.startsWith('.')) continue
+    const target = stripExt(resolve(dir, spec))
     const nameNode = v.getNameNode()
     if (nameNode.getKind() !== SyntaxKind.ObjectBindingPattern) continue
     // importedName, not getPropertyNameNode()?.getText(): for a quoted key

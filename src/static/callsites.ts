@@ -59,21 +59,6 @@ const FN_LIKE_KINDS = new Set([
  * covers both `{ fetch }` and a renamed-into `{ http: fetch }` (the bound local name, not the
  * property name, is what matters for a bare `fetch(...)` call).
  */
-function paramDeclaresFetch(p: ParameterDeclaration): boolean {
-  const nameNode = p.getNameNode()
-  const kind = nameNode.getKind()
-  if (kind === SyntaxKind.ObjectBindingPattern || kind === SyntaxKind.ArrayBindingPattern) {
-    const pattern = nameNode as ObjectBindingPattern | ArrayBindingPattern
-    return pattern
-      .getElements()
-      .some(
-        (el) =>
-          el.getKind() === SyntaxKind.BindingElement &&
-          (el as BindingElement).getName() === 'fetch',
-      )
-  }
-  return kind === SyntaxKind.Identifier && nameNode.getText() === 'fetch'
-}
 
 /**
  * Whether the given node itself (not its descendants) declares a binding named `fetch`:
@@ -121,7 +106,11 @@ function declaresFetch(node: Node): boolean {
       | ConstructorDeclaration
       | GetAccessorDeclaration
       | SetAccessorDeclaration
-    if (fn.getParameters().some(paramDeclaresFetch)) return true
+    // bindsName, not a shallow element scan: a parameter destructures exactly like a variable
+    // declaration does, so `({ deps: { fetch } }) => …` and `({ a: fetch }) => …` shadow the
+    // global just as much as `({ fetch }) =>` does. The shallow version missed the nested and
+    // renamed forms and reported no-timeout at error severity on a shadowed call.
+    if (fn.getParameters().some((prm) => bindsName(prm.getNameNode(), 'fetch'))) return true
     if (
       (kind === SyntaxKind.FunctionDeclaration || kind === SyntaxKind.FunctionExpression) &&
       (fn as FunctionDeclaration | FunctionExpression).getName() === 'fetch'

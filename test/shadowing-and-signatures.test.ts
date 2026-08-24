@@ -37,6 +37,29 @@ describe('a locally destructured fetch is not the global', () => {
     expect(r.findings.filter((f) => f.rule === 'no-timeout')).toEqual([])
   })
 
+  // Parameters destructure exactly like variable declarations, so they go through the same
+  // helper. A shallow element scan missed the nested and renamed forms and fired no-timeout at
+  // error severity on a call whose fetch was plainly shadowed.
+  it('a nested parameter destructure shadows it', async () => {
+    const r = await audit({
+      'a.ts': [
+        'declare const ctx: { deps: { fetch: (u: string) => Promise<unknown> } }',
+        "export const f = ({ deps: { fetch } }: typeof ctx) => fetch('https://v.dev/a')",
+      ].join('\n'),
+    })
+    expect(r.findings.filter((f) => f.rule === 'no-timeout')).toEqual([])
+  })
+
+  it('a renamed parameter destructure shadows it', async () => {
+    const r = await audit({
+      'a.ts': [
+        'declare const ctx: { inner: (u: string) => Promise<unknown> }',
+        "export const f = ({ inner: fetch }: typeof ctx) => fetch('https://v.dev/a')",
+      ].join('\n'),
+    })
+    expect(r.findings.filter((f) => f.rule === 'no-timeout')).toEqual([])
+  })
+
   it('array destructuring shadows it too', async () => {
     const r = await audit({
       'a.ts': [

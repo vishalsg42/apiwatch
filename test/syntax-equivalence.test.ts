@@ -120,3 +120,70 @@ describe('spellings of one module specifier are treated identically', () => {
     expect(by('tick.js')).toBe(by('quote.js'))
   })
 })
+
+/**
+ * Two more `require` readers, both parsing source TEXT with a regex that assumed quotes and no
+ * whitespace. Fixing one of them last round and not its siblings is exactly the failure this
+ * whole file exists to catch, so these are equivalence assertions rather than examples: whatever
+ * a quoted require does, a backtick or spaced one must do too.
+ */
+describe('spellings of a CommonJS require are read identically', () => {
+  const write = (files: Record<string, string>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'apiwatch-req-'))
+    mkdirSync(join(dir, 'src'))
+    writeFileSync(
+      join(dir, 'package.json'),
+      '{"name":"r","dependencies":{"axios":"^1.7.0","zod":"^3"}}',
+    )
+    for (const [n, b] of Object.entries(files)) writeFileSync(join(dir, 'src', n), b)
+    return dir
+  }
+
+  // collectImportedNames: a response handed to an imported helper must ABSTAIN, not be called
+  // proven-unvalidated. The spelling of the require it came from cannot change that.
+  it('a helper imported by backtick or spaced require still downgrades to unknown', async () => {
+    const body = (spec: string) =>
+      [
+        "const axios = require('axios')",
+        `const { handler } = require(${spec})`,
+        "module.exports.f = async () => { const r = await axios.get('https://v.dev/a', { timeout: 100 }); return handler(r.data) }",
+      ].join('\n')
+    const { sites } = await runAudit({
+      root: write({
+        'quoted.js': body("'./helpers'"),
+        'tick.js': body('`./helpers`'),
+        'spaced.js': body('"./helpers" '),
+        'helpers.js': 'module.exports.handler = (x) => x\n',
+      }),
+      json: true,
+    })
+    const by = (n: string) => sites.find((s) => s.file.endsWith(n))?.options.validated
+    expect(by('quoted.js')).toBe('unknown') // control: this already worked
+    expect(by('tick.js')).toBe(by('quoted.js'))
+    expect(by('spaced.js')).toBe(by('quoted.js'))
+  })
+
+  // registry: a cross-module client consumed by backtick require must still resolve. This one was
+  // never reported; it was found by sweeping for the same pattern after fixing its sibling.
+  it('a cross-module client survives a backtick require in the consumer', async () => {
+    const { sites } = await runAudit({
+      root: write({
+        'http.js': [
+          "const axios = require('axios')",
+          'module.exports.api = axios.create({ timeout: 5000 })',
+        ].join('\n'),
+        'quoted.js': [
+          "const { api } = require('./http')",
+          "module.exports.f = () => api.get('https://v.dev/a')",
+        ].join('\n'),
+        'tick.js': [
+          'const { api } = require(`./http`)',
+          "module.exports.g = () => api.get('https://v.dev/b')",
+        ].join('\n'),
+      }),
+      json: true,
+    })
+    const seen = sites.map((s) => s.file.split('/').pop()).sort()
+    expect(seen).toEqual(['quoted.js', 'tick.js'])
+  })
+})
