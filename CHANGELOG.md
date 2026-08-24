@@ -7,6 +7,30 @@ apiwatch is pre-1.0, so minor versions may change behaviour. Each entry says whe
 more findings or fewer after upgrading, because a change in finding count is otherwise
 indistinguishable from a regression.
 
+## 0.3.7 (2026-08-24)
+
+**No findings change and no baseline needs regenerating.** `fingerprintVersion` stays at 2.
+Verified across six repositories: 668 findings, none added, none removed, every per-rule count
+identical.
+
+### Fixed
+
+- The `fingerprintVersion` mismatch error now names the whole recovery, in order: review without
+  `--baseline` first, then regenerate, then commit. It previously named only `apiwatch baseline`,
+  which accepts every finding currently visible and reports just a count, so anyone following it
+  literally never saw what they had accepted. The message also now says to pin an exact version in
+  CI. A workflow on `apiwatch@0.3` went red the moment 0.3.6 published, because a floating range
+  upgraded it across the 0.3.5 fingerprint bump with no change on the user's side.
+- The README's CI recipe told you to run `apiwatch baseline accept` after an upgrade. That works
+  for a release that adds findings and cannot work for one that changes finding identity. The two
+  cases are now distinguished.
+
+### Changed
+
+- The build moved from `tsup`, which is no longer maintained upstream, to `tsdown`. Build-time
+  only; nothing in the dependency tree a user installs changed. The published bundle grows 24%
+  because tsdown preserves source comments, and its actual code is smaller than before.
+
 ## 0.3.6 (2026-08-24)
 
 **No findings change and no baseline needs regenerating.** `fingerprintVersion` stays at 2. This
