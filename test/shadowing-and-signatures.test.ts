@@ -203,3 +203,53 @@ describe('a client held on a class property', () => {
     expect(r.findings.filter((f) => f.rule === 'no-timeout')).toHaveLength(1)
   })
 })
+
+/**
+ * `export default` is the most common way to share a configured client, and it resolved to
+ * nothing in every consumer. buildRegistry only records bindings whose exportedAs is set, and
+ * resolveClients only ever looked at NAMED imports, so the consumer produced zero call sites and
+ * said nothing about it: no diagnostic, no counter, just an empty audit for the file.
+ */
+describe('a client shared by default export', () => {
+  const files = {
+    'http.ts': [
+      "import axios from 'axios'",
+      'const client = axios.create({ timeout: 5000 })',
+      'export default client',
+    ].join('\n'),
+    'consumer.ts': [
+      "import api from './http'",
+      "export const getData = () => api.get('https://api.v.dev/data')",
+    ].join('\n'),
+    'named.ts': [
+      "import axios from 'axios'",
+      'export const named = axios.create({ timeout: 5000 })',
+    ].join('\n'),
+    'consumer2.ts': [
+      "import { named } from './named'",
+      "export const getData2 = () => named.get('https://api.v.dev/data')",
+    ].join('\n'),
+  }
+
+  it('resolves in the consumer, exactly as a named export does', async () => {
+    const r = await audit(files)
+    const seen = r.sites.map((s) => s.file.split('/').pop()).sort()
+    expect(seen).toEqual(['consumer.ts', 'consumer2.ts']) // the named one is the control
+    for (const s of r.sites) expect(s.options.timeoutMs).toBe('instance-default')
+  })
+
+  it('resolves an inline export default axios.create()', async () => {
+    const r = await audit({
+      'http.ts': [
+        "import axios from 'axios'",
+        'export default axios.create({ timeout: 5000 })',
+      ].join('\n'),
+      'consumer.ts': [
+        "import api from './http'",
+        "export const getData = () => api.get('https://api.v.dev/data')",
+      ].join('\n'),
+    })
+    expect(r.sites).toHaveLength(1)
+    expect(r.sites[0]?.options.timeoutMs).toBe('instance-default')
+  })
+})

@@ -91,3 +91,32 @@ describe('spellings of one config object are analysed identically', () => {
     expect(withOther[0]?.timeoutMs).toBeNull()
   })
 })
+
+/**
+ * The same property, applied to module specifiers and CLI arguments. Both were violated the same
+ * way: one spelling analysed, an equivalent spelling not.
+ */
+describe('spellings of one module specifier are treated identically', () => {
+  const cjs = (q: string) =>
+    [
+      `const axios = require(${q}axios${q})`,
+      `const { z } = require(${q}zod${q})`,
+      'const S = z.object({})',
+      "module.exports.f = async () => { const r = await axios.get('https://v.dev/a', { timeout: 100 }); return S.parse(r.data) }",
+    ].join('\n')
+
+  it('a backtick require is the same import as a quoted one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'apiwatch-eq-'))
+    mkdirSync(join(dir, 'src'))
+    writeFileSync(
+      join(dir, 'package.json'),
+      '{"name":"eq","dependencies":{"axios":"^1.7.0","zod":"^3"}}',
+    )
+    writeFileSync(join(dir, 'src', 'tick.js'), cjs('`'))
+    writeFileSync(join(dir, 'src', 'quote.js'), cjs("'"))
+    const { sites } = await runAudit({ root: dir, json: true })
+    const by = (n: string) => sites.find((s) => s.file.endsWith(n))?.options.validated
+    expect(by('quote.js')).toBe(true) // control: this already worked
+    expect(by('tick.js')).toBe(by('quote.js'))
+  })
+})

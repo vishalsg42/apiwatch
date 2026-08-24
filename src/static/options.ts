@@ -490,32 +490,43 @@ export function resolveOptions(
         // configured but its value isn't statically known here.
         timeoutMs = 'instance-default'
       }
-    } else {
-      const sig = lookup('signal')
-      if (sig) {
-        const m = !sig.shorthand
-          ? // [\d_] not \d: JavaScript numeric separators are legal and common in timeout
-            // literals. `AbortSignal.timeout(10_000)` read as 'unknown' rather than 10000,
-            // found in Ghost by a precision audit. Precision-safe (it abstained rather than
-            // firing) but the reported model was wrong about a protected call.
-            /AbortSignal\.timeout\(\s*([\d_]+)\s*\)/.exec(sig.initializer.getText())
-          : null
-        // Only AbortSignal.timeout(n) proves a deadline. A bare `controller.signal` may only
-        // ever be aborted by hand, or never, and whether a setTimeout is wired to it elsewhere
-        // is not knowable here. Calling that 'instance-default' asserted a protection that may
-        // not exist; 'unknown' says what is actually true. Both keep no-timeout silent, so this
-        // changes the model's honesty rather than the findings.
-        timeoutMs = m ? Number(m[1].replace(/_/g, '')) : 'unknown'
-      } else if (opaque) {
-        // No `timeout` and no `signal` of its own, but a spread may carry either.
-        timeoutMs = 'unknown'
-      }
     }
   }
-  // binding.instanceTimeout still wins over a merely-absent timeout, unchanged from before this
-  // fix. It does NOT override 'unknown': an unreadable config argument stays 'unknown' rather
-  // than being upgraded to 'instance-default', which is fine either way since no-timeout only
-  // fires on `null` and 'unknown' never triggers it.
+
+  // Checked whenever no deadline has been established yet, INCLUDING after a falsy timeout.
+  // `{ timeout: 0, signal: AbortSignal.timeout(5000) }` is a real pattern: switch off the
+  // client's own timeout and let the signal govern. The signal used to be read only in the
+  // branch taken when no `timeout` key existed at all, so a falsy one shadowed it, the call
+  // resolved to null (PROVEN ABSENT) and fired no-timeout at error severity on protected code.
+  // `timeout: 0` with no signal still resolves to null, because that genuinely is no deadline.
+  if (config && timeoutMs === null) {
+    const sig = lookup('signal')
+    if (sig) {
+      const m = !sig.shorthand
+        ? // [\d_] not \d: JavaScript numeric separators are legal and common in timeout
+          // literals. `AbortSignal.timeout(10_000)` read as 'unknown' rather than 10000,
+          // found in Ghost by a precision audit. Precision-safe (it abstained rather than
+          // firing) but the reported model was wrong about a protected call.
+          /AbortSignal\.timeout\(\s*([\d_]+)\s*\)/.exec(sig.initializer.getText())
+        : null
+      // Only AbortSignal.timeout(n) proves a deadline. A bare `controller.signal` may only
+      // ever be aborted by hand, or never, and whether a setTimeout is wired to it elsewhere
+      // is not knowable here. Calling that 'instance-default' asserted a protection that may
+      // not exist; 'unknown' says what is actually true. Both keep no-timeout silent, so this
+      // changes the model's honesty rather than the findings.
+      timeoutMs = m ? Number(m[1].replace(/_/g, '')) : 'unknown'
+    } else if (opaque) {
+      // No readable `timeout` and no `signal` of its own, but a spread may carry either, so
+      // absence stays unprovable. Restoring this after it was lost in a refactor: without it a
+      // spread-bearing config reported a PROVEN-absent timeout, which is an error-severity false
+      // positive and the exact defect the spread rule exists to prevent.
+      timeoutMs = 'unknown'
+    }
+  }
+
+  // binding.instanceTimeout still wins over a merely-absent timeout. It does NOT override
+  // 'unknown': an unreadable config argument stays 'unknown' rather than being upgraded to
+  // 'instance-default', which is fine either way since no-timeout only fires on `null`.
   if (timeoutMs === null && binding.instanceTimeout) timeoutMs = 'instance-default'
 
   // Same absent-vs-unreadable split as timeoutMs above, except binding.kind === 'got' and

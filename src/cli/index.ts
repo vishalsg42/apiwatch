@@ -309,7 +309,32 @@ async function runBaseline(argv: string[], io: CliIo): Promise<number> {
   }
 }
 
+/**
+ * Rewrites the GNU attached form `--flag=value` into the separated pair `['--flag', 'value']`,
+ * once, before any subcommand parses anything.
+ *
+ * Done as a normalisation rather than inside the parsers because there are two of them, each with
+ * its own invariants: the audit parser's MISSING sentinel that distinguishes `--root --json` from
+ * an absent value, and its rule that a positional token is only ever the value of the preceding
+ * value flag. Teaching both about `=` would mean maintaining that reasoning twice.
+ *
+ * Splits on the FIRST `=` only, so a value may contain one (`--root=/srv/a=b`). `--flag=` with
+ * nothing after it expands to the flag alone, so the existing "requires a value" check fires
+ * rather than the flag silently taking an empty string. Only tokens beginning with `-` are
+ * touched, so a value that happens to contain `=` is never split.
+ */
+export const expandAttachedFlags = (argv: string[]): string[] =>
+  argv.flatMap((a) => {
+    if (!a.startsWith('-')) return [a]
+    const eq = a.indexOf('=')
+    if (eq === -1) return [a]
+    const name = a.slice(0, eq)
+    const value = a.slice(eq + 1)
+    return value === '' ? [name] : [name, value]
+  })
+
 export async function runCli(argv: string[], io: CliIo): Promise<number> {
+  argv = expandAttachedFlags(argv)
   if (argv.includes('--version')) {
     io.write(`${version()}\n`)
     return 0

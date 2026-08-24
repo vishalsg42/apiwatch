@@ -1,4 +1,5 @@
 import {
+  type NoSubstitutionTemplateLiteral,
   type ObjectBindingPattern,
   type SourceFile,
   type StringLiteral,
@@ -16,7 +17,17 @@ export function collectFileImports(sf: SourceFile): string[] {
         c.getExpression().getText() === 'require',
     )
     .map((c) => c.getArguments()[0])
-    .filter((a): a is StringLiteral => !!a && a.getKind() === SyntaxKind.StringLiteral)
+    // A backtick specifier is the same specifier. `require(`zod`)` is a
+    // NoSubstitutionTemplateLiteral rather than a StringLiteral, so it was dropped here and the
+    // file read as importing no validator, which made a validated response report as
+    // unvalidated. The quoted spelling of identical code worked. A template WITH substitutions
+    // is deliberately excluded: its specifier is not statically known.
+    .filter(
+      (a): a is StringLiteral | NoSubstitutionTemplateLiteral =>
+        !!a &&
+        (a.getKind() === SyntaxKind.StringLiteral ||
+          a.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral),
+    )
     .map((a) => a.getLiteralValue())
   return [...esm, ...cjs]
 }

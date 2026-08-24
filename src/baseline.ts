@@ -1,4 +1,4 @@
-import { readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, sep } from 'node:path'
 import type { Finding } from './model.js'
 import { FP_VERSION } from './static/callsites.js'
@@ -135,6 +135,10 @@ export function writeBaseline(
 }
 
 function atomicWrite(path: string, contents: string): void {
+  // `--out .config/apiwatch/baseline.json` into a directory that does not exist reported an
+  // ENOENT naming a temp file the user never asked for. Exit code 2 rather than a crash, but the
+  // message pointed at the wrong thing entirely. Creating the directory is what they meant.
+  mkdirSync(dirname(path), { recursive: true })
   const tmp = join(dirname(path), `.${process.pid}.apiwatch-baseline.tmp`)
   writeFileSync(tmp, contents)
   renameSync(tmp, path)

@@ -41,6 +41,10 @@ export function resolveClients(sf: SourceFile, reg: Map<string, ClientBinding>) 
     const target = stripExt(resolve(dir, spec))
     for (const n of d.getNamedImports())
       apply(local, reg, target, n.getName(), n.getAliasNode()?.getText() ?? n.getName())
+    // `import client from './http'` against `export default ...`. Omitting this made every
+    // consumer of a default-exported client report zero call sites, silently.
+    const def = d.getDefaultImport()
+    if (def) apply(local, reg, target, 'default', def.getText())
   }
 
   // CJS: `const { api } = require('./http')`. Without this, resolveClients only ever looked at

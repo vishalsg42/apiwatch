@@ -361,6 +361,30 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
     }
   }
 
+  // `export default axios.create({...})` and `export default client`.
+  //
+  // buildRegistry only records bindings whose exportedAs is set, and resolveClients only ever
+  // looked at named imports, so a client shared by default export resolved to nothing in every
+  // consumer and produced ZERO call sites there. That is the most common way to share a
+  // configured client, and it failed silently: no diagnostic, no counter, just an empty audit
+  // for the file. Keyed as 'default', matching the name a default import resolves under.
+  for (const ea of sf.getDescendantsOfKind(SyntaxKind.ExportAssignment)) {
+    if (ea.isExportEquals()) continue // `export = x` is CJS interop, not a default export
+    const expr = ea.getExpression()
+    // `export default client` re-exports a binding this file already derived.
+    const existing = out.get(bindingNameOf(expr.getText()))
+    if (existing?.origin === 'derived') {
+      existing.exportedAs = 'default'
+      continue
+    }
+    // `export default axios.create({...})` derives inline, with no local name to bind to.
+    const b = deriveFromCreate(out, 'default', expr)
+    if (b) {
+      b.exportedAs = 'default'
+      out.set('default', b)
+    }
+  }
+
   // class fields: `private readonly api = axios.create({...})`
   for (const pd of sf.getDescendantsOfKind(SyntaxKind.PropertyDeclaration)) {
     const b = deriveFromCreate(out, pd.getName(), pd.getInitializer())
