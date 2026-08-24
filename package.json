@@ -1,6 +1,6 @@
 {
   "name": "apiwatch",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "type": "module",
   "description": "A CI guard for outbound HTTP calls in Node and TypeScript: fails the build on new calls with no timeout, and reports missing retry and response validation. Static, never runs your code.",
   "license": "MIT",

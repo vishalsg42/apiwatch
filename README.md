@@ -137,6 +137,28 @@ See [`examples/vulnerable-service`](./examples/vulnerable-service) for what it d
 
 `no-timeout` is the only rule at `error`, so it is the only one `--fail-on error` gates on.
 
+### How accurate are they
+
+Two rules have been measured against blind reviewers who were never told apiwatch exists, on six
+public repositories at pinned commits:
+
+| rule | confirmed | precision | 95% lower bound |
+|---|---|---|---|
+| `no-timeout` | 40 of 40 | 100% | 91.2% |
+| `no-retry` | 39 of 40 | 97.5% | 87.1% |
+
+Read those with their caveats, which are in
+[`docs/audits/no-retry-precision/`](./docs/audits/no-retry-precision/) along with the scoring rules,
+the sampling frame and every raw verdict. The short version: 63% of `no-retry`'s findings are on
+calls with no readable method, so that number is substantially a statement about bare `fetch(url)`;
+the one false positive was a call wrapped in a higher-order retry helper, which is a known and
+deliberate blind spot; and around 80% of the calls `no-retry` stays silent on turn out to have no
+retry either, which is what this precision costs in recall.
+
+`unvalidated-response`, `hardcoded-host`, `deprecated-client` and `legacy-client` have **not** been
+measured this way.
+
+
 Every rule fires only on a **proven** negative and abstains when the call is not statically
 readable. `no-retry` is phrased as a review prompt rather than a defect: failing fast is often
 correct, and apiwatch can see that no retry is configured but not whether that was a decision. It
@@ -171,7 +193,7 @@ jobs:
       # legitimately ADD findings (0.3.3 made three CommonJS import shapes visible), which
       # would fail your build on a version bump you never made. Upgrade deliberately, and run
       # `apiwatch baseline accept` if the new findings are ones you are accepting.
-      - run: npx apiwatch@0.3.5 audit --baseline .apiwatch-baseline.json --fail-on error
+      - run: npx apiwatch@0.3.6 audit --baseline .apiwatch-baseline.json --fail-on error
 ```
 
 The baseline survives ordinary work: inserting lines, reformatting, reordering calls, renaming a

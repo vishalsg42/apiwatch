@@ -7,6 +7,57 @@ apiwatch is pre-1.0, so minor versions may change behaviour. Each entry says whe
 more findings or fewer after upgrading, because a change in finding count is otherwise
 indistinguishable from a regression.
 
+## 0.3.6 (2026-08-24)
+
+**No findings change and no baseline needs regenerating.** `fingerprintVersion` stays at 2. This
+release corrects what apiwatch *says* about calls it already judged correctly, fixes three
+reporting defects, and publishes the first precision measurement of `no-retry`.
+
+### Fixed
+
+- `AbortSignal.timeout(10_000)` now reads as `10000` rather than as unreadable. The pattern allowed
+  digits only, and JavaScript numeric separators are legal and common in timeout literals. No
+  finding moves, because `no-timeout` fires only on a proven absence and both values keep it silent.
+  What was wrong is the reported model: a call that is genuinely protected was described as
+  unreadable.
+- When findings exceed the 50-item detail cap, the terminal output now says `use --json to see all
+  findings`. It used to point at `.apiwatch/audit.md`, which is wrong twice over: that file is
+  written only under `--write-report`, and even when written it applies the same cap and says the
+  rest are not shown. `--json` is the only uncapped output.
+- The analysed file count can no longer print as a negative number on a run where whole directories
+  could not be listed. Display only: the underlying count still gates the guards that refuse to
+  write or compare a baseline from a partial run.
+- `N file(s) could not be analysed` is now `path(s)`, because the count includes directories.
+
+### Measured
+
+`no-retry` precision is **39 of 40**, 97.5%, with a 95% lower bound of 87.1%, judged blind on six
+public repositories at pinned commits. Two reviewers on different models agreed on 98.1% of cases
+(Cohen kappa 0.899) and independently named the same false positive. Previously only `no-timeout`
+had been measured, so no precision figure could be quoted without naming that one rule.
+
+The scoring rules and sample were fixed before any reviewer ran. Method, raw verdicts and caveats
+are in `docs/audits/no-retry-precision/`. The most important caveat: 63% of `no-retry` findings are
+on calls with no readable method, so the figure is substantially about bare `fetch(url)`.
+
+### Documented
+
+- A client selected by an expression, such as `(insecure ? http : https).request(...)`, is skipped
+  with no diagnostic and reaches no counter. This is stripe-node's shape, and it is why that
+  repository reports zero call sites. Now in Limitations, and pinned by a test so the claim breaks
+  if the gap is ever closed.
+- A new Supply chain section explains what automated scanners flag on this package and what each
+  alert actually is. The published bundle contains no `http://` or `https://` string and imports no
+  networking module, which is now enforced by a test over the packed tarball rather than asserted.
+
+### Known, not fixed here
+
+A `retry` key on a plain axios call is treated as proof of retry, but `AxiosRequestConfig` has no
+such option, so the key is inert and a genuine finding is silently suppressed
+([#5](https://github.com/vishalsg42/apiwatch/issues/5)). Fixing it adds findings, which would turn a
+pinned consumer's CI red on upgrade, so it is deliberately held back from this release rather than
+bundled into one that promises no findings change.
+
 ## 0.3.5 (2026-08-23)
 
 **Findings move in both directions, and every baseline must be regenerated.** Four independent
