@@ -32,6 +32,24 @@ export type CallOptions = {
   // `'none'` means retry is PROVEN ABSENT, the same contract as `timeoutMs: null` above.
   // `'unknown'` means the config argument wasn't statically readable, same twilio-node repro.
   retry: 'none' | 'library' | 'unknown'
+  /**
+   * Diagnostic only: WHY `retry` resolved as it did. No rule reads it, and it is not part of the
+   * `--json` contract, because ReportModel carries findings rather than call sites.
+   *
+   * It exists because `'unknown'` has four unrelated causes (an unreadable config argument, an
+   * opaque spread, an explicit disable hidden behind a spread, and a hand-rolled retry loop) and
+   * `'none'` has three. Collapsing them into one word makes the resolver's own reasoning
+   * uninspectable: a precision audit cannot tell an abstention it should ignore from one that
+   * points at a real blind spot, and neither can a bug report.
+   */
+  retryReason?:
+    | 'client-default' // binding.kind === 'got', or an instance built with retry configured
+    | 'explicit' // a `retry`/`retries` key read directly off this call's config
+    | 'disabled' // present but explicitly off: `retry: 0`, `retry: { limit: 0 }`
+    | 'absent' // no config argument at all, or a readable one with no retry key
+    | 'unreadable' // a config argument exists at the expected index but is not statically readable
+    | 'opaque-spread' // a spread could carry retry, so absence is unprovable
+    | 'manual-loop' // a hand-rolled retry loop: not proof of retry, but proof absence cannot be shown
   validated: boolean | 'unknown'
 }
 

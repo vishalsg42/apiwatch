@@ -319,7 +319,7 @@ function retryExplicitlyDisabled(config: Node | undefined): boolean {
 export function resolveOptions(
   call: CallExpression,
   binding: ClientBinding,
-): Pick<CallOptions, 'timeoutMs' | 'retry'> {
+): Pick<CallOptions, 'timeoutMs' | 'retry' | 'retryReason'> {
   const arg = configArg(call, binding)
   const config = arg.kind === 'object' ? arg.node : undefined
   // A readable object that nonetheless hides keys behind a spread. Absence and disablement
@@ -396,22 +396,44 @@ export function resolveOptions(
   // Same absent-vs-unreadable split as timeoutMs above, except binding.kind === 'got' and
   // binding.instanceRetry still win unconditionally, exactly as before this fix: a resolved
   // client-level guarantee is trusted even when THIS call's own config can't be read.
+  // retryReason tracks WHY, alongside every assignment to retry rather than reconstructed after
+  // the fact, so the two can never disagree. It is diagnostic: no rule reads it. See CallOptions.
   let retry: CallOptions['retry'] =
     binding.kind === 'got' || binding.instanceRetry
       ? 'library'
       : arg.kind === 'unreadable'
         ? 'unknown'
         : 'none'
-  if (retry === 'none' && config && (lookup('retry') || lookup('retries'))) retry = 'library'
+  let retryReason: CallOptions['retryReason'] =
+    binding.kind === 'got' || binding.instanceRetry
+      ? 'client-default'
+      : arg.kind === 'unreadable'
+        ? 'unreadable'
+        : 'absent'
+  if (retry === 'none' && config && (lookup('retry') || lookup('retries'))) {
+    retry = 'library'
+    retryReason = 'explicit'
+  }
   // Same contract as timeoutMs: a spread may carry `retry`/`retries`, so absence is unprovable.
-  if (retry === 'none' && opaque) retry = 'unknown'
+  if (retry === 'none' && opaque) {
+    retry = 'unknown'
+    retryReason = 'opaque-spread'
+  }
   // An explicit `retry: 0` / `retry: { limit: 0 }` overrides both the client-kind default and
   // the presence check above: the call was deliberately configured NOT to retry.
-  if (retry === 'library' && retryExplicitlyDisabled(config)) retry = opaque ? 'unknown' : 'none'
+  if (retry === 'library' && retryExplicitlyDisabled(config)) {
+    // Behind a spread the disable is readable but absence still is not, so the verdict stays
+    // 'unknown' and the reason names the spread, not the disable, which is what made it unprovable.
+    retry = opaque ? 'unknown' : 'none'
+    retryReason = opaque ? 'opaque-spread' : 'disabled'
+  }
   // A hand-rolled retry loop is not proof of retry, but it is proof that absence of retry
   // cannot be shown, so abstain instead of warning. See isInManualRetryLoop for why this is
   // narrower than the loop-ancestor heuristic that preceded it.
-  if (retry === 'none' && isInManualRetryLoop(call)) retry = 'unknown'
+  if (retry === 'none' && isInManualRetryLoop(call)) {
+    retry = 'unknown'
+    retryReason = 'manual-loop'
+  }
   // A `for`/`while` ancestor was previously treated as a hand-rolled retry loop and mapped
   // to 'manual'. Measured against a real repo, this was wrong: a `while (hasMore) { try {
   // ... } catch {} }` pagination loop is structurally identical to a retry loop, and 23.7%
@@ -431,5 +453,5 @@ export function resolveOptions(
   // wrapper's calling convention, so this only trusts what it can see at the call site itself
   // (the `retry`/`retries` option) or on the resolved client binding (`instanceRetry`,
   // `got`'s built-in retry).
-  return { timeoutMs, retry }
+  return { timeoutMs, retry, retryReason }
 }
