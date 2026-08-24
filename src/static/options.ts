@@ -70,18 +70,56 @@ const spreadOperandLiterals = (n: Node): Node[] | undefined => {
  * severity while `axios.get(url, cfg)` correctly abstained. That asymmetry marks it as an
  * oversight rather than a policy.
  */
-const analyseSpreads = (n: Node): { opaque: boolean; extra: Node[] } => {
+const analyseSpreads = (n: Node): ConfigShape => {
   const props = n.asKind(SyntaxKind.ObjectLiteralExpression)?.getProperties() ?? []
   const extra: Node[] = []
+  const valueUnreadable = new Set<string>()
   for (const x of props) {
-    if (x.getKind() !== SyntaxKind.SpreadAssignment) continue
-    const operand = x.asKind(SyntaxKind.SpreadAssignment)?.getExpression()
-    const lits = operand ? spreadOperandLiterals(operand) : undefined
-    if (!lits) return { opaque: true, extra: [] }
-    extra.push(...lits)
+    switch (x.getKind()) {
+      // A plain `a: 1` or a shorthand `{ a }`. Readable, PROVIDED its key can be named: a
+      // computed key cannot, and falls through to opaque below.
+      case SyntaxKind.PropertyAssignment:
+      case SyntaxKind.ShorthandPropertyAssignment:
+        if (keyOfProp(x) === undefined) return OPAQUE
+        break
+      case SyntaxKind.SpreadAssignment: {
+        const operand = x.asKind(SyntaxKind.SpreadAssignment)?.getExpression()
+        const lits = operand ? spreadOperandLiterals(operand) : undefined
+        if (!lits) return OPAQUE
+        extra.push(...lits)
+        break
+      }
+      // `{ get timeout() { … } }`, `{ timeout() { … } }`. The KEY is present, so absence is
+      // disproved, but the value is behind a function body and cannot be read. Recorded by name
+      // rather than making the whole object opaque, so an unrelated `toString()` costs nothing.
+      case SyntaxKind.GetAccessor:
+      case SyntaxKind.SetAccessor:
+      case SyntaxKind.MethodDeclaration: {
+        const k = keyOfProp(x)
+        if (k === undefined) return OPAQUE
+        valueUnreadable.add(k)
+        break
+      }
+      // No default that shrugs. Any property kind this switch does not name could contribute any
+      // key, so it makes the object opaque and every absence unprovable. That is what turns a
+      // future syntax gap into silence instead of an error-severity false positive.
+      default:
+        return OPAQUE
+    }
   }
-  return { opaque: false, extra }
+  return { opaque: false, extra, valueUnreadable }
 }
+
+/**
+ * What a config object literal can and cannot tell us.
+ *
+ * `opaque` means some property could contribute ANY key, so no absence is provable and every
+ * lookup must abstain. `extra` are literals a readable spread contributes, looked up as though
+ * written inline. `valueUnreadable` names keys that ARE present but whose value sits behind a
+ * function body.
+ */
+type ConfigShape = { opaque: boolean; extra: Node[]; valueUnreadable: Set<string> }
+const OPAQUE: ConfigShape = { opaque: true, extra: [], valueUnreadable: new Set() }
 
 type PropLookup = { shorthand: true } | { shorthand: false; initializer: Node }
 
@@ -95,8 +133,14 @@ type PropLookup = { shorthand: true } | { shorthand: false; initializer: Node }
  * correctly-protected code. See issue #13.
  */
 const keyOfProp = (p: Node): string | undefined => {
+  // Every named member kind, not just assignments: a method or accessor names a key too, and
+  // treating its name as unreadable made an unrelated `toString()` turn the whole object opaque.
   const named =
-    p.asKind(SyntaxKind.PropertyAssignment) ?? p.asKind(SyntaxKind.ShorthandPropertyAssignment)
+    p.asKind(SyntaxKind.PropertyAssignment) ??
+    p.asKind(SyntaxKind.ShorthandPropertyAssignment) ??
+    p.asKind(SyntaxKind.MethodDeclaration) ??
+    p.asKind(SyntaxKind.GetAccessor) ??
+    p.asKind(SyntaxKind.SetAccessor)
   const node = named?.getNameNode()
   if (!node) return undefined
   const k = node.getKind()
@@ -386,7 +430,12 @@ export function resolveOptions(
   // become unprovable; explicit properties are still read. See hasSpread.
   // `extra` are object literals a readable spread can contribute; look them up as though they
   // were written inline. `opaque` means at least one spread hides its keys entirely.
-  const { opaque, extra } = config ? analyseSpreads(config) : { opaque: false, extra: [] }
+  const { opaque, extra, valueUnreadable } = config
+    ? analyseSpreads(config)
+    : { opaque: false, extra: [], valueUnreadable: new Set<string>() }
+  // A key defined by a getter or method IS present, so absence is disproved, but its value is
+  // behind a function body. Reported as a shorthand, which is already the "present, value not
+  // statically known" signal every caller understands.
   const lookup = (name: string): PropLookup | undefined => {
     if (!config) return undefined
     const own = prop(config, name)
@@ -395,7 +444,7 @@ export function resolveOptions(
       const found = prop(e, name)
       if (found) return found
     }
-    return undefined
+    return valueUnreadable.has(name) ? { shorthand: true } : undefined
   }
 
   // 'unknown' only when a config argument EXISTS but isn't statically readable. When there is
