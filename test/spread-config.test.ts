@@ -73,3 +73,14 @@ describe('a spread whose keys are visible hides nothing', () => {
   it('stays unknown when a ternary spread has one opaque branch', async () =>
     expect((await opt('axios-ternary-half-opaque.ts')).timeoutMs).toBe('unknown'))
 })
+
+// Found by a blind precision audit against Ghost: `AbortSignal.timeout(10_000)` read as
+// 'unknown' because the regex did not allow JavaScript numeric separators. Precision-safe, since
+// 'unknown' keeps no-timeout silent, but the model reported a protected call as unreadable.
+describe('numeric separators in a timeout literal', () => {
+  it('reads AbortSignal.timeout(10_000) as 10000', async () =>
+    expect((await opt('signal-separator.ts')).timeoutMs).toBe(10000))
+
+  it('still reads a plain AbortSignal.timeout(10000)', async () =>
+    expect((await opt('signal-plain.ts')).timeoutMs).toBe(10000))
+})

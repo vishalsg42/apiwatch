@@ -369,14 +369,18 @@ export function resolveOptions(
       const sig = lookup('signal')
       if (sig) {
         const m = !sig.shorthand
-          ? /AbortSignal\.timeout\(\s*(\d+)\s*\)/.exec(sig.initializer.getText())
+          ? // [\d_] not \d: JavaScript numeric separators are legal and common in timeout
+            // literals. `AbortSignal.timeout(10_000)` read as 'unknown' rather than 10000,
+            // found in Ghost by a precision audit. Precision-safe (it abstained rather than
+            // firing) but the reported model was wrong about a protected call.
+            /AbortSignal\.timeout\(\s*([\d_]+)\s*\)/.exec(sig.initializer.getText())
           : null
         // Only AbortSignal.timeout(n) proves a deadline. A bare `controller.signal` may only
         // ever be aborted by hand, or never, and whether a setTimeout is wired to it elsewhere
         // is not knowable here. Calling that 'instance-default' asserted a protection that may
         // not exist; 'unknown' says what is actually true. Both keep no-timeout silent, so this
         // changes the model's honesty rather than the findings.
-        timeoutMs = m ? Number(m[1]) : 'unknown'
+        timeoutMs = m ? Number(m[1].replace(/_/g, '')) : 'unknown'
       } else if (opaque) {
         // No `timeout` and no `signal` of its own, but a spread may carry either.
         timeoutMs = 'unknown'
