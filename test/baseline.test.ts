@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { keyOf, readBaseline, writeBaseline } from '../src/baseline.js'
 import type { Finding } from '../src/model.js'
@@ -101,6 +101,35 @@ describe('baseline file', () => {
     expect(msg).toMatch(/pin/i)
     // the review step must come before the regenerate step, not merely be present
     expect(msg.indexOf('audit --fail-on error')).toBeLessThan(msg.indexOf('apiwatch baseline'))
+  })
+
+  // The caller resolves a relative --baseline to an absolute path before reading it, so echoing
+  // that back handed a CI user a long absolute path instead of the short one they typed. Step 2
+  // has to be paste-ready or the numbered list is decoration.
+  it('echoes the path the user typed, not the resolved absolute one', () => {
+    const p = tmp()
+    writeBaseline(p, [finding()], '0.3.0', opts)
+    const raw = JSON.parse(readFileSync(p, 'utf8'))
+    raw.fingerprintVersion = 999
+    writeFileSync(p, JSON.stringify(raw))
+    const cwd = process.cwd()
+    // realpathSync because macOS resolves the temp dir through a /private symlink: chdir to the
+    // unresolved path leaves process.cwd() reporting the resolved one, relative() then yields a
+    // ../.. escape, and the test fails for a reason that has nothing to do with the code.
+    process.chdir(realpathSync(dirname(p)))
+    try {
+      // Exactly what the CLI does: resolve() the user's relative --baseline against the current
+      // directory, then read it. Passing a relative path here instead would exercise a code path
+      // the CLI never takes, and the assertion would hold with or without the fix.
+      readBaseline(resolve(basename(p)))
+      throw new Error('expected a mismatch')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      expect(msg).toContain(`--out ${basename(p)}`)
+      expect(msg).not.toContain(dirname(p))
+    } finally {
+      process.chdir(cwd)
+    }
   })
 
   it('rejects a baseline recorded against a different root', () => {

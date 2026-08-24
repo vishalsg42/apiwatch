@@ -7,6 +7,17 @@ apiwatch is pre-1.0, so minor versions may change behaviour. Each entry says whe
 more findings or fewer after upgrading, because a change in finding count is otherwise
 indistinguishable from a regression.
 
+## 0.3.8 (2026-08-24)
+
+**No findings change and no baseline needs regenerating.** `fingerprintVersion` stays at 2.
+
+### Fixed
+
+- The `fingerprintVersion` mismatch message now echoes the baseline path you typed rather than the
+  absolute one the CLI resolved it to. 0.3.7 added a numbered recovery to that error, but step 2
+  printed a fully-qualified path, so the command it told you to run was not the command you could
+  paste back. A numbered list you cannot copy is decoration.
+
 ## 0.3.7 (2026-08-24)
 
 **No findings change and no baseline needs regenerating.** `fingerprintVersion` stays at 2.

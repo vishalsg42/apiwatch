@@ -196,7 +196,7 @@ jobs:
       # fingerprintVersion, which invalidates every baseline entry).
       # If new findings appear, `apiwatch baseline accept` takes them. If the identity changed,
       # accept CANNOT work; see Upgrading below for the review-then-regenerate sequence.
-      - run: npx apiwatch@0.3.7 audit --baseline .apiwatch-baseline.json --fail-on error
+      - run: npx apiwatch@0.3.8 audit --baseline .apiwatch-baseline.json --fail-on error
 ```
 
 The baseline survives ordinary work: inserting lines, reformatting, reordering calls, renaming a
