@@ -1,10 +1,8 @@
 # Case study: Outline
 
-Real output against a 2144-file production codebase, with the reasoning behind the number of call
-sites apiwatch reports and, more importantly, the ones it deliberately does not.
-
-Real output against [Outline](https://github.com/outline/outline) v1.9.1, a self-hosted knowledge
-base. Nothing is anonymised, so every line is checkable:
+Real output against [Outline](https://github.com/outline/outline) v1.9.1, a 2144-file self-hosted
+knowledge base, and the reasoning behind the call sites apiwatch reports as well as the ones it
+deliberately stays silent on. Nothing is anonymised, so every line is checkable:
 
 ```
 git clone --depth 1 --branch v1.9.1 https://github.com/outline/outline

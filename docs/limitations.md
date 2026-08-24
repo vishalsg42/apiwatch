@@ -4,9 +4,6 @@ Every entry is a real, measured gap rather than a hedge, and each says what it c
 finding, a wrong finding, or a surprising baseline. The README carries a summary; this is the
 detail behind it.
 
-Every one of these is a real, measured gap, not a hedge. They are grouped by what they cost you: a
-missed finding, a wrong finding, or a surprising baseline.
-
 ### What it cannot see
 
 - **Static only.** Most real call sites build their URL at runtime, so most hosts report as unresolved. apiwatch never runs your code, so a value assembled from a runtime config object or template string is opaque to it.

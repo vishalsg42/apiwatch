@@ -62,13 +62,6 @@ sites, three quarters of them wrong.
 
 That silence is the design. [Read the full case study](./docs/case-study-outline.md).
 
-## Install
-
-```
-npx apiwatch audit          # no install
-npm i -D apiwatch           # or add it to the project
-```
-
 ## Usage
 
 ```
@@ -148,7 +141,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      # Pinned to an EXACT version on purpose: apiwatch@0.3.6, never apiwatch@0.3. A range
+      # Pinned to an EXACT version on purpose: apiwatch@0.4.0, never apiwatch@0.4. A range
       # upgrades you the moment a release publishes, so CI can go red with no change on your
       # side. apiwatch is pre-1.0, and a patch release can legitimately add findings (0.3.3
       # made three CommonJS import shapes visible) or change finding identity (0.3.5 bumped
