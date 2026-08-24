@@ -33,7 +33,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsdown",
     "test": "vitest run",
     "lint": "biome check ."
   },
@@ -41,11 +41,11 @@
     "ts-morph": "^28"
   },
   "devDependencies": {
-    "vitest": "^4",
-    "tsup": "^8",
-    "typescript": "^7",
     "@biomejs/biome": "^2",
     "@types/node": "^22",
-    "tsx": "^4"
+    "tsdown": "^0.22.14",
+    "tsx": "^4",
+    "typescript": "^7",
+    "vitest": "^4"
   }
 }

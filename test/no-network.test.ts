@@ -31,15 +31,30 @@ const NETWORK_MODULES = [
   'worker_threads',
 ]
 
+// Comments must be stripped before scanning. apiwatch's own doc comments quote import statements
+// as examples (`import fetch from 'node-fetch'`, `const request = require('request')`), and a
+// scanner that reads them reports imports the bundle does not have. This was not hypothetical: the
+// check passed under the previous bundler only because that bundler stripped comments, so the
+// weakness was invisible until the build changed. A comment can also name a NETWORK module, which
+// would have produced a false alarm in the other direction.
+const stripComments = (src: string) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+    .join('\n')
+
 // Matches `require('net')`, `from 'node:net'`, `import('node:net')`. Bare and node:-prefixed.
-// The character class must allow hyphens, dots and @scopes: a first pass used [a-z_/]+ and
-// silently missed `from "ts-morph"` entirely, which would equally have missed a dependency named
-// something like `fast-net`. A capability check with a blind spot is worse than none.
+// The character class allows hyphens, dots and @scopes: a first pass used [a-z_/]+ and silently
+// missed `from "ts-morph"` entirely, which would equally have missed a dependency named something
+// like `fast-net`. A capability check with a blind spot is worse than none.
 const importsOf = (src: string) =>
   new Set(
-    [...src.matchAll(/(?:require\(|from\s*|import\()\s*['"](node:)?(@?[a-z0-9._/-]+)['"]/g)].map(
-      (m) => m[2],
-    ),
+    [
+      ...stripComments(src).matchAll(
+        /(?:require\(|from\s*|import\()\s*['"](node:)?(@?[a-z0-9._/-]+)['"]/g,
+      ),
+    ].map((m) => m[2]),
   )
 
 let bundle: string | undefined
@@ -72,6 +87,14 @@ describe('the published package cannot reach the network', () => {
     // requires a networking module. That is a point-in-time fact, not something this asserts.
     const unexpected = [...importsOf(bundle as string)].filter((m) => !allowed.has(m))
     expect(unexpected).toEqual([])
+  })
+
+  it('ignores a module named only in a comment, but not a real one', () => {
+    // Both halves matter. Reading comments causes false alarms; skipping real code causes misses.
+    const commented = `/** see \`import { request } from 'node:https'\` */\nconst x = 1`
+    expect([...importsOf(commented)]).toEqual([])
+    const real = `import { request } from 'node:https'\nconst x = 1`
+    expect([...importsOf(real)]).toEqual(['https'])
   })
 
   it('fails when a network import is present, which is what makes the check meaningful', () => {
