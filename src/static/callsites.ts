@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto'
 import {
-  type ArrayBindingPattern,
   type ArrowFunction,
-  type BindingElement,
   type Block,
   type CallExpression,
   type CatchClause,
@@ -12,9 +10,7 @@ import {
   type GetAccessorDeclaration,
   type MethodDeclaration,
   type Node,
-  type ObjectBindingPattern,
   type ObjectLiteralExpression,
-  type ParameterDeclaration,
   type PropertyAssignment,
   type SetAccessorDeclaration,
   type SourceFile,
@@ -51,14 +47,6 @@ const FN_LIKE_KINDS = new Set([
   SyntaxKind.GetAccessor,
   SyntaxKind.SetAccessor,
 ])
-
-/**
- * Whether a parameter binds the name `fetch`. `ParameterDeclaration.getName()` returns the
- * PATTERN SOURCE TEXT for a destructured parameter (e.g. `"{ fetch }"`, not `"fetch"`), so a
- * destructured shape must be unpacked via its name node instead: walking `BindingElement`s
- * covers both `{ fetch }` and a renamed-into `{ http: fetch }` (the bound local name, not the
- * property name, is what matters for a bare `fetch(...)` call).
- */
 
 /**
  * Whether the given node itself (not its descendants) declares a binding named `fetch`:
