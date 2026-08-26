@@ -135,6 +135,32 @@ export const unvalidatedResponse: Rule = {
       ),
 }
 
+/**
+ * The version of `name` declared by the package that owns `file`, or undefined.
+ *
+ * Walks from the file's directory up to the workspace root and answers with the FIRST package
+ * that declares the name, which is what a bundler and a package manager both do. Nothing falls
+ * back to "some other package in the repo declares it": that fallback is the whole defect, since
+ * it makes a file's verdict depend on a sibling package it has no relationship with.
+ *
+ * `file` is repo-relative posix; `packageDirs` and `root` are absolute posix.
+ */
+export function depVersion(ws: Workspace, file: string, name: string): string | undefined {
+  const full = `${ws.root}/${file}`
+  let dir = full.slice(0, full.lastIndexOf('/'))
+  for (;;) {
+    const own = ws.dependenciesByDir[dir]
+    if (own && name in own) return own[name]
+    if (dir === ws.root) return undefined
+    const cut = dir.lastIndexOf('/')
+    // Above the root, or out of separators: stop rather than walking the real filesystem upward.
+    if (cut < 0) return undefined
+    const next = dir.slice(0, cut)
+    if (next === dir || !dir.startsWith(ws.root)) return undefined
+    dir = next
+  }
+}
+
 export const deprecatedClient: Rule = {
   name: 'deprecated-client',
   severity: 'warn',
@@ -176,15 +202,18 @@ export const legacyClient: Rule = {
   name: 'legacy-client',
   severity: 'info',
   check: (s, ws) => {
-    const nfMajor = Number(
-      (ws.dependencies['node-fetch'] ?? '').replace(/[^\d.]/g, '').split('.')[0] || '0',
-    )
-    if (nfMajor !== 2) return []
     const seen = new Set<string>()
     const out: Finding[] = []
     for (const x of s) {
       if (x.client !== 'node-fetch' || seen.has(x.file)) continue
       seen.add(x.file)
+      // Resolved per file, not once for the workspace. A monorepo can hold node-fetch@2 and @3
+      // at the same time, and the old merged lookup answered with whichever package.json the
+      // filesystem walk reached last. See depVersion and #9.
+      const nfMajor = Number(
+        (depVersion(ws, x.file, 'node-fetch') ?? '').replace(/[^\d.]/g, '').split('.')[0] || '0',
+      )
+      if (nfMajor !== 2) continue
       out.push(
         F(
           'legacy-client',

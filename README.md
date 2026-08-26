@@ -204,8 +204,6 @@ That is a deliberate trade: it misses things rather than inventing them. The hea
 - **Framework-level timeouts.** `HttpModule.register({ timeout })` in NestJS is invisible, so calls
   through it report `no-timeout` despite being protected.
 - **Hand-rolled retry loops make `no-retry` abstain**, but they do not count as retry.
-- **In a monorepo, dependency versions merge across packages**, so `deprecated-client` and
-  `legacy-client` can be wrong in both directions. Prefer `--root packages/<name>`.
 
 Each of these is measured, with the reproduction and the cost. [Read the full list](./docs/limitations.md).
 

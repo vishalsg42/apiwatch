@@ -117,7 +117,15 @@ export type Workspace = {
   root: string // absolute, posix
   sourceFiles: string[] // absolute, posix
   packageDirs: string[] // absolute, posix
-  dependencies: Record<string, string> // merged deps+devDeps across all package.json files; on key collision the last file walked wins (non-deterministic in a monorepo)
+  /**
+   * deps+devDeps of each package.json, keyed by its ABSOLUTE posix directory.
+   *
+   * Deliberately not merged into one map. A merged map made the answer depend on which
+   * package.json the filesystem walk reached last, so a monorepo with node-fetch@2 in one package
+   * and @3 in another got a different verdict on macOS than on Linux, and a committed baseline
+   * disagreed with CI. Resolve through `depVersion`, which asks the package that owns the file.
+   */
+  dependenciesByDir: Record<string, Record<string, string>>
   /** Directories that could not be listed. Their files were never discovered, so any run with
    * a non-zero count saw less than the whole repo. */
   unreadableDirs: number

@@ -66,7 +66,10 @@ describe('rules', () => {
   it('deprecated-client covers the request family, not node-fetch', () => {
     const nf = [site({ client: 'node-fetch', fileImports: ['node-fetch'] })]
     expect(
-      only('deprecated-client', nf, { ...ws, dependencies: { 'node-fetch': '^2.6.7' } }),
+      only('deprecated-client', nf, {
+        ...ws,
+        dependenciesByDir: { '/repo': { 'node-fetch': '^2.6.7' } },
+      }),
     ).toHaveLength(0)
     expect(
       only('deprecated-client', [site({ client: 'request', fileImports: ['request'] })]),
@@ -75,11 +78,17 @@ describe('rules', () => {
 
   it('legacy-client flags node-fetch v2 at info severity, but not v3', () => {
     const nf = [site({ client: 'node-fetch', fileImports: ['node-fetch'] })]
-    const v2 = only('legacy-client', nf, { ...ws, dependencies: { 'node-fetch': '^2.6.7' } })
+    const v2 = only('legacy-client', nf, {
+      ...ws,
+      dependenciesByDir: { '/repo': { 'node-fetch': '^2.6.7' } },
+    })
     expect(v2).toHaveLength(1)
     expect(v2[0].severity).toBe('info')
     expect(
-      only('legacy-client', nf, { ...ws, dependencies: { 'node-fetch': '^3.3.0' } }),
+      only('legacy-client', nf, {
+        ...ws,
+        dependenciesByDir: { '/repo': { 'node-fetch': '^3.3.0' } },
+      }),
     ).toHaveLength(0)
   })
 

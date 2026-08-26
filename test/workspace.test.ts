@@ -24,6 +24,8 @@ describe('discoverWorkspace', () => {
     expect(
       (await discoverWorkspace(fx('jsx-repo'))).sourceFiles.some((f) => f.endsWith('.tsx')),
     ).toBe(true))
-  it('collects dependencies for pure rules to read', async () =>
-    expect((await discoverWorkspace(fx('simple-express'))).dependencies.axios).toBe('^1.7.0'))
+  it('collects dependencies per package, for pure rules to resolve against a file', async () => {
+    const w = await discoverWorkspace(fx('simple-express'))
+    expect(w.dependenciesByDir[w.root]?.axios).toBe('^1.7.0')
+  })
 })

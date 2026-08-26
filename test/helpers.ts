@@ -22,7 +22,7 @@ export const ws: Workspace = {
   root: '/repo',
   sourceFiles: [],
   packageDirs: ['/repo'],
-  dependencies: {},
+  dependenciesByDir: {},
   nonShippingFilesExcluded: 0,
   unreadableDirs: 0,
 }

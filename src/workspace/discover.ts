@@ -75,7 +75,12 @@ export async function discoverWorkspace(
   const sourceFiles: string[] = [],
     nonShipping: string[] = [],
     packageDirs: string[] = []
-  const dependencies: Record<string, string> = {}
+  // Keyed by package directory, NOT merged into one map. A merged map answered "does this repo
+  // depend on X" when the question every rule actually asks is "does the package that owns THIS
+  // FILE depend on X". In a monorepo pinning node-fetch@2 in one package and @3 in another, the
+  // merged answer was whichever package.json the walk happened to reach last, which is filesystem
+  // order, which differs between macOS and Linux. See #9.
+  const dependenciesByDir: Record<string, Record<string, string>> = {}
 
   // `outside` latches on: every descendant of a non-shipping directory is non-shipping too.
   async function walk(dir: string, outside: boolean) {
@@ -101,7 +106,11 @@ export async function discoverWorkspace(
         packageDirs.push(posix(dir))
         try {
           const pkg = JSON.parse(await readFile(p, 'utf8'))
-          Object.assign(dependencies, pkg.devDependencies ?? {}, pkg.dependencies ?? {})
+          // deps last: a package that lists something in both wins with the real dependency.
+          dependenciesByDir[posix(dir)] = {
+            ...(pkg.devDependencies ?? {}),
+            ...(pkg.dependencies ?? {}),
+          }
         } catch {
           /* an unreadable package.json is not fatal */
         }
@@ -117,7 +126,7 @@ export async function discoverWorkspace(
     root: posix(root),
     sourceFiles: included.sort(),
     packageDirs,
-    dependencies,
+    dependenciesByDir,
     nonShippingFilesExcluded: opts.includeNonShipping ? 0 : nonShipping.length,
     unreadableDirs,
   }
