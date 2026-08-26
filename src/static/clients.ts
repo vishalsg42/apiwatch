@@ -241,7 +241,40 @@ export function importedName(node: {
   return key.getText()
 }
 
+/**
+ * Names reachable as a PROPERTY of the CJS module object but NOT as a named ESM import.
+ *
+ * axios's declaration exports the client as `export default` and names nothing else callable:
+ * its named exports are Axios, AxiosError, AxiosHeaders, create, defaults and friends, with no
+ * verb among them. The verbs live on the default export, which is a function carrying bound
+ * methods, so `const { get } = require('axios')` destructures the module object and gets a
+ * working client, while `import { get } from 'axios'` imports a named export that does not
+ * exist. Both facts are asserted in test/export-conformance.test.ts rather than assumed.
+ *
+ * That asymmetry is why this is a second table instead of more entries in CLIENT_EXPORTS.
+ * Widening the one allowlist would have bound the ESM spelling too, reporting findings against a
+ * call that is `undefined(...)` at runtime.
+ *
+ * Only verbs, and only for a client whose module object genuinely carries them. This is the
+ * narrow version of the change that caused the 0.3.3 regression, where `createServer` was added
+ * to node:http and server construction started reporting as outbound traffic. The difference is
+ * that node:http exports servers AND clients from one module, so any widening there must
+ * discriminate, whereas axios exports no server at all and a verb name cannot mean anything else.
+ * See #7, and the negative matrix in test/cjs-destructured-verbs.test.ts.
+ */
+export const CJS_ONLY_PROPERTIES: Partial<Record<ClientKind, Set<string>>> = {
+  axios: new Set(['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'request']),
+}
+
 const isClientExport = (kind: ClientKind, name: string) => CLIENT_EXPORTS[kind]?.has(name) ?? false
+
+/**
+ * The same question for a CJS module object, which is a superset: everything importable by name
+ * is also a property, plus whatever the default export carries. Used by the `require(x).name` and
+ * `const { name } = require(x)` paths only. The ESM named-import path stays on isClientExport.
+ */
+const isClientProperty = (kind: ClientKind, name: string) =>
+  isClientExport(kind, name) || (CJS_ONLY_PROPERTIES[kind]?.has(name) ?? false)
 const isClientFactory = (kind: ClientKind, name: string) =>
   CLIENT_FACTORIES[kind]?.has(name) ?? false
 
@@ -329,7 +362,7 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
       if (shape.property !== undefined) {
         const local = v.getName()
         if (isClientFactory(kind, shape.property)) out.set(local, bind(local, kind, 'factory'))
-        else if (isClientExport(kind, shape.property))
+        else if (isClientProperty(kind, shape.property))
           out.set(local, bind(local, kind, 'import', false, false, verbOf(shape.property)))
         continue
       }
@@ -346,7 +379,7 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
           if (!local) continue
           const imported = importedName(el)
           if (isClientFactory(kind, imported)) out.set(local, bind(local, kind, 'factory'))
-          else if (isClientExport(kind, imported))
+          else if (isClientProperty(kind, imported))
             out.set(local, bind(local, kind, 'import', false, false, verbOf(imported)))
         }
         continue
@@ -354,6 +387,44 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
       out.set(v.getName(), bind(v.getName(), kind, 'import'))
       continue
     }
+    // `const rp = require('request-promise'); const { get } = rp`
+    //
+    // The verb is destructured off an EXISTING binding rather than directly off the require, so
+    // the branch above never sees it and the call was invisible. Both spellings destructure the
+    // same object at runtime, so analysing only the one written in a single statement made the
+    // verdict depend on whether the author split the line.
+    //
+    // Declarations are walked in document order, so the binding this reads has already been
+    // recorded. Gated by isClientProperty on the BASE's kind, so a name that is not a real
+    // property of that client still binds nothing, and instance-level protection carries across:
+    // a verb pulled off an `axios.create({ timeout })` instance is still covered by it.
+    if (init.getKind() === SyntaxKind.Identifier) {
+      const base = out.get(bindingNameOf(init.getText()))
+      const nameNode = v.getNameNode()
+      if (base && nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
+        for (const el of (nameNode as ObjectBindingPattern).getElements()) {
+          const local = el.getName()
+          if (!local) continue
+          const imported = importedName(el)
+          if (isClientFactory(base.kind, imported))
+            out.set(local, bind(local, base.kind, 'factory'))
+          else if (isClientProperty(base.kind, imported))
+            out.set(
+              local,
+              bind(
+                local,
+                base.kind,
+                'import',
+                base.instanceTimeout,
+                base.instanceRetry,
+                verbOf(imported),
+              ),
+            )
+        }
+        continue
+      }
+    }
+
     const b = deriveFromCreate(out, v.getName(), init)
     if (b) {
       b.exportedAs = v.getVariableStatement()?.isExported() ? v.getName() : undefined

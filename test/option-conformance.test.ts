@@ -1,8 +1,8 @@
 import { resolve } from 'node:path'
-import { ModuleKind, ModuleResolutionKind, Project, ScriptTarget } from 'ts-morph'
 import { describe, expect, it } from 'vitest'
 import type { ClientKind } from '../src/model.js'
 import { CLIENT_OPTIONS } from '../src/static/options.js'
+import { conformanceProject } from './conformance-project.js'
 import { repoRoot } from './helpers.js'
 
 /**
@@ -33,18 +33,7 @@ import { repoRoot } from './helpers.js'
  * runtime dependency and none of these are it.
  */
 
-/** A real type-resolving project. Nothing like the one apiwatch audits with. */
-const project = new Project({
-  compilerOptions: {
-    target: ScriptTarget.ESNext,
-    module: ModuleKind.NodeNext,
-    moduleResolution: ModuleResolutionKind.NodeNext,
-    strict: true,
-    skipLibCheck: true,
-    types: ['node'],
-    lib: ['lib.esnext.full.d.ts'],
-  },
-})
+const project = conformanceProject()
 
 /**
  * Every options type, by the name this file refers to it by. The probe lives inside the repo so
