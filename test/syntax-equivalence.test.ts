@@ -37,6 +37,24 @@ const optionsFor = async (src: string) => {
   return sites.map((s) => ({ timeoutMs: s.options.timeoutMs, retry: s.options.retry }))
 }
 
+/** The resolved verb, plus the rules that fired, which is where a dropped verb shows up. */
+const methodsFor = async (src: string) => {
+  const { sites, model } = await runAudit({ root: write(src), json: true })
+  return sites.map((s) => ({
+    method: s.method,
+    rules: model.findings
+      .filter((f) => f.callSiteId === s.id)
+      .map((f) => f.rule)
+      .sort(),
+  }))
+}
+
+/** Position-independent identity, which must not depend on how a route label is quoted. */
+const fingerprintsFor = async (src: string) => {
+  const { sites } = await runAudit({ root: write(src), json: true })
+  return sites.map((s) => s.fingerprint)
+}
+
 /** The same object, written every way JavaScript allows. */
 const spellings = (key: string, value: string) => [
   `{ ${key}: ${value} }`,
@@ -78,6 +96,29 @@ describe('spellings of one config object are analysed identically', () => {
     )
     for (const r of results) expect(JSON.stringify(r)).toBe(JSON.stringify(results[0]))
     expect(results[0][0]?.retry).toBe('library')
+  })
+
+  /**
+   * The same property applied to a config VALUE rather than a config key.
+   *
+   * `method: `post`` is a NoSubstitutionTemplateLiteral, and only StringLiteral was read, so the
+   * verb was dropped. That is not a quiet loss: a call with no method counts as idempotent by
+   * design, so no-retry fired on the backtick POST and stayed silent on the quoted one. Two
+   * spellings of one POST, two different verdicts, and the louder one was the wrong one.
+   */
+  it('method: a backtick verb is the same verb as a quoted one', async () => {
+    const call = (v: string) =>
+      `import axios from 'axios'\nexport const f = () => axios({ method: ${v}, url: 'https://v.dev/a' })`
+    const results = await Promise.all(
+      ["'post'", '"post"', '`post`'].map(async (v) => ({ v, got: await methodsFor(call(v)) })),
+    )
+    for (const r of results)
+      expect(JSON.stringify(r.got), `${r.v} disagreed with ${results[0].v}`).toBe(
+        JSON.stringify(results[0].got),
+      )
+    // and the shared answer is the right one: a POST, so no-retry must not fire
+    expect(results[0].got[0]?.method).toBe('post')
+    expect(results[0].got[0]?.rules).not.toContain('no-retry')
   })
 
   // The inverse property: two objects JavaScript treats DIFFERENTLY must not be conflated.
@@ -185,5 +226,35 @@ describe('spellings of a CommonJS require are read identically', () => {
     })
     const seen = sites.map((s) => s.file.split('/').pop()).sort()
     expect(seen).toEqual(['quoted.js', 'tick.js'])
+  })
+})
+
+/**
+ * The property applied to identity rather than to analysis.
+ *
+ * A route handler's fingerprint includes the route it handles, because six byte-identical calls
+ * in six anonymous handlers are otherwise indistinguishable. The label was read as StringLiteral
+ * only, so `router.get(`/orders`, ...)` lost it, every backtick route in a file collapsed to a
+ * bare `router.get`, and the fingerprint moved. Nothing about the request changed; a repo that
+ * reformatted its routes to template literals would simply have found its committed baseline
+ * stale, with old entries unmatched and the same findings reported as new.
+ *
+ * This is the one equivalence that a rule-level test could never catch: the finding is identical
+ * either way. Only its identity differs.
+ */
+describe('a route label is the same label however it is quoted', () => {
+  const route = (q: string) =>
+    [
+      'declare const router: any',
+      `router.get(${q}/orders${q}, (_q: any, _s: any) => fetch('https://v.dev/a'))`,
+    ].join('\n')
+
+  it('quoting a route never moves the fingerprint', async () => {
+    const [single, double, backtick] = await Promise.all(
+      ["'", '"', '`'].map((q) => fingerprintsFor(route(q))),
+    )
+    expect(single).toHaveLength(1)
+    expect(double).toEqual(single)
+    expect(backtick).toEqual(single)
   })
 })

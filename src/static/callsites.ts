@@ -153,8 +153,14 @@ function isFetchShadowedHere(call: CallExpression): boolean {
 /**
  * Bumped whenever the fingerprint derivation below changes, so a baseline written by an older
  * apiwatch is detectably incompatible rather than silently mismatching every entry.
+ *
+ * 3: route labels written with backticks now key on the route, as quoted ones always did, and a
+ * config `method` written with backticks now resolves to its verb. Both feed the fingerprint, so
+ * sites written that way move. Sites using quoted spellings keep the fingerprint they had, which
+ * is why the whole hash is versioned rather than left to mismatch entry by entry: a baseline
+ * written by 0.4.x is refused with instructions instead of quietly losing its backtick entries.
  */
-export const FP_VERSION = 2
+export const FP_VERSION = 3
 
 /** Every loop-free ancestor kind that owns a nameable scope. */
 const NAMED_SCOPE_KINDS = new Set([
@@ -217,7 +223,15 @@ function symbolPathOf(call: CallExpression): string {
       const ce = a as CallExpression
       if (ce.getArguments().some((arg) => arg === child)) {
         const callee = ce.getExpression().getText()
-        const label = ce.getArguments().find((arg) => arg.getKind() === SyntaxKind.StringLiteral)
+        // Backticks count as a route label too. `router.get(\`/orders\`, handler)` is the same
+        // route as `router.get('/orders', handler)`, but reading only StringLiteral dropped the
+        // label, collapsing every backtick route in a file to a bare `router.get` and moving the
+        // fingerprint. A repo that reformatted its routes to template literals would have found
+        // its committed baseline silently stale. See FP_VERSION.
+        const label = ce.getArguments().find((arg) => {
+          const k = arg.getKind()
+          return k === SyntaxKind.StringLiteral || k === SyntaxKind.NoSubstitutionTemplateLiteral
+        })
         parts.push(
           label
             ? `${callee}(${(label as unknown as { getLiteralValue(): string }).getLiteralValue()})`

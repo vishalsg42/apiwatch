@@ -320,8 +320,17 @@ export function configMethod(call: CallExpression, binding: ClientBinding): stri
   const config = configObj(call, binding)
   if (!config) return undefined
   const m = prop(config, 'method')
-  if (!m || m.shorthand || m.initializer.getKind() !== SyntaxKind.StringLiteral) return undefined
-  const raw = m.initializer.getText().slice(1, -1).toLowerCase()
+  if (!m || m.shorthand) return undefined
+  // Backticks too. `method: `post`` is a NoSubstitutionTemplateLiteral, and reading only
+  // StringLiteral dropped the verb, which is worse than it sounds: a call with no method is
+  // treated as idempotent by design (see IDEMPOTENT), so no-retry fired on a POST written with
+  // backticks and stayed silent on the identical POST written with quotes.
+  const k = m.initializer.getKind()
+  if (k !== SyntaxKind.StringLiteral && k !== SyntaxKind.NoSubstitutionTemplateLiteral)
+    return undefined
+  // getLiteralText rather than slicing the source text: it is the same for these two kinds and
+  // it does not depend on the quote characters being one byte each.
+  const raw = m.initializer.asKindOrThrow(k).getLiteralText().toLowerCase()
   return raw === 'del' ? 'delete' : raw
 }
 
