@@ -8,7 +8,8 @@ import { renderMarkdown } from '../report/markdown.js'
 import { buildReport } from '../report/model.js'
 import { renderTty } from '../report/tty.js'
 import { runRules } from '../rules/index.js'
-import { findCallSites } from '../static/callsites.js'
+import { findCallSites, repoRelative } from '../static/callsites.js'
+import { bindsAnImportedClient } from '../static/clients.js'
 import { createProjects } from '../static/project.js'
 import { buildRegistry, resolveClients } from '../static/registry.js'
 import { discoverWorkspace } from '../workspace/discover.js'
@@ -38,10 +39,24 @@ export async function runAudit(
   // analysis. Both mean the run did not see everything, which is what the baseline gates on.
   let filesSkipped = projects.reduce((n, p) => n + p.unreadable, 0) + ws.unreadableDirs
 
+  // Files that reach for an HTTP client and yield no call site at all. Recorded because the one
+  // limitation with NO visible symptom is a client apiwatch cannot resolve: the call is skipped,
+  // it reaches no counter, and the file still reports as analysed, so a repository whose client
+  // is built by an expression reports a confident zero. See #6.
+  //
+  // Only shown when the whole run found nothing, which is when a zero is a question rather than
+  // an answer. Measured across two public repositories it flags 6 files of which 1 is a genuine
+  // miss, the rest being `http.Agent` used as a type or a base class, so it is far too noisy to
+  // put in every report and exactly right when the alternative is an unexplained zero.
+  const clientFilesWithoutCallSites: string[] = []
   for (const { project } of projects)
     for (const sf of project.getSourceFiles()) {
       try {
-        sites.push(...findCallSites(sf, resolveClients(sf, registry), ws))
+        const clients = resolveClients(sf, registry)
+        const found = findCallSites(sf, clients, ws)
+        sites.push(...found)
+        if (found.length === 0 && bindsAnImportedClient(clients))
+          clientFilesWithoutCallSites.push(repoRelative(ws, sf.getFilePath() as string))
       } catch {
         filesSkipped++
       }
@@ -84,7 +99,7 @@ export async function runAudit(
     baselineAccepted,
     baselineResolved,
   })
-  let output = opts.json ? renderJson(model) : renderTty(model)
+  let output = opts.json ? renderJson(model) : renderTty(model, { clientFilesWithoutCallSites })
 
   // Only write a file when asked. An audit that reads a repo should not leave a new untracked
   // file in it as a side effect of every run, and 0.1.x did exactly that on every non-JSON run.

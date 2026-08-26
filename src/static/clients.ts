@@ -321,6 +321,16 @@ function requireShape(init: Node): { specifier: string; property?: string } | un
  *
  * One helper for every lookup, so the two halves cannot drift apart again.
  */
+/**
+ * Does this file reach for an HTTP client at all?
+ *
+ * The global `fetch` is registered in every file that does not shadow it, so it says nothing
+ * about intent and is excluded. A factory builds a client rather than being one, so a file
+ * holding only factories makes no request by design.
+ */
+export const bindsAnImportedClient = (clients: Map<string, ClientBinding>): boolean =>
+  [...clients.values()].some((b) => b.kind !== 'fetch' && b.origin !== 'factory')
+
 export const bindingNameOf = (text: string): string =>
   text.startsWith('this.') ? text.slice(5) : text
 

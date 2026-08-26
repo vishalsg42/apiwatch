@@ -200,7 +200,8 @@ That is a deliberate trade: it misses things rather than inventing them. The hea
   unknown value, a computed key, a getter: none proves a timeout is absent, so the rules abstain.
 - **Clients reached indirectly.** A factory, a DI container other than `@nestjs/axios`, or a client
   selected by an expression such as `(insecure ? http : https).request(...)` may be missed
-  entirely, with no diagnostic.
+  entirely. No finding is produced, but a run that finds nothing anywhere now names the files that
+  imported a client, so a zero is not left unexplained.
 - **Framework-level timeouts.** `HttpModule.register({ timeout })` in NestJS is invisible, so calls
   through it report `no-timeout` despite being protected.
 - **Hand-rolled retry loops make `no-retry` abstain**, but they do not count as retry.

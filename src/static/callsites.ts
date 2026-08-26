@@ -324,14 +324,23 @@ export function fingerprintOf(
     .slice(0, 24)
 }
 
+/**
+ * A source path as findings record it: repo-relative posix. Exported so nothing else has to
+ * reimplement the prefix strip and drift from it. `ws.root` is normalized at discovery, so the
+ * defensive trailing-slash strip here is belt and braces rather than the load-bearing fix.
+ */
+export function repoRelative(ws: Workspace, abs: string): string {
+  const root = ws.root.endsWith('/') ? ws.root.slice(0, -1) : ws.root
+  return abs.startsWith(`${root}/`) ? abs.slice(root.length + 1) : abs
+}
+
 export function findCallSites(
   sf: SourceFile,
   clients: Map<string, ClientBinding>,
   ws: Workspace,
 ): CallSite[] {
   const abs = sf.getFilePath() as string
-  const root = ws.root.endsWith('/') ? ws.root.slice(0, -1) : ws.root // a user-supplied --root may carry a trailing slash
-  const file = abs.startsWith(`${root}/`) ? abs.slice(root.length + 1) : abs
+  const file = repoRelative(ws, abs)
   const fileImports = collectFileImports(sf)
   const fetchIsImported = importBindsFetch(sf)
   const out: CallSite[] = []
