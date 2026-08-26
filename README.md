@@ -198,9 +198,10 @@ That is a deliberate trade: it misses things rather than inventing them. The hea
 - **Static only.** Most real URLs are built at runtime, so most hosts report as unresolved.
 - **A config object that is not a literal at the call site.** `axios(config)`, a spread of an
   unknown value, a computed key, a getter: none proves a timeout is absent, so the rules abstain.
-- **Clients reached indirectly.** A factory, a DI container other than `@nestjs/axios`, or a client
-  selected by an expression such as `(insecure ? http : https).request(...)` may be missed
-  entirely. No finding is produced, but a run that finds nothing anywhere now names the files that
+- **Clients reached indirectly.** A factory or a DI container other than `@nestjs/axios` may be
+  missed entirely. An expression is followed when every branch resolves to the same client, so
+  `(insecure ? http : https).request(...)` is found, but `clients[name].get(...)` is not: which
+  client a map returns is a runtime fact. A run that finds nothing anywhere names the files that
   imported a client, so a zero is not left unexplained.
 - **Framework-level timeouts.** `HttpModule.register({ timeout })` in NestJS is invisible, so calls
   through it report `no-timeout` despite being protected.

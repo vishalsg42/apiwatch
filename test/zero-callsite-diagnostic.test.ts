@@ -29,12 +29,19 @@ const audit = async (files: Record<string, string>) => {
   return runAudit({ root: dir })
 }
 
-/** stripe-node's shape: the client is chosen by a conditional, so the call resolves to nothing. */
+/**
+ * A client this analysis still cannot resolve. It is read out of a map, so WHICH client
+ * `clients[name]` returns is a runtime fact and no syntactic rule can decide it.
+ *
+ * A ternary used to be the example here, and was stripe-node's shape. It resolves now, because
+ * both arms are visible and can be required to agree. An element access is the part of #6 that
+ * remains, and it is what this diagnostic exists to make visible.
+ */
 const EXPRESSION_CLIENT = [
-  "import * as http from 'node:http'",
-  "import * as https from 'node:https'",
-  'declare const insecure: boolean',
-  "export const f = () => (insecure ? http : https).request({ host: 'v.dev' })",
+  "import axios from 'axios'",
+  'const clients: Record<string, typeof axios> = { primary: axios }',
+  'declare const name: string',
+  "export const f = () => clients[name].get('https://v.dev/a')",
 ].join('\n')
 
 describe('an unexplained zero names the files it could not read', () => {

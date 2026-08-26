@@ -481,6 +481,68 @@ function retryExplicitlyDisabled(config: Node | undefined, names: readonly strin
   return false
 }
 
+/**
+ * A deadline set on the ClientRequest that `node:http` returns, rather than in the options object.
+ *
+ * `http.request(opts)` returns a ClientRequest, and `req.setTimeout(ms)` is the idiomatic way to
+ * give it a deadline: `RequestOptions.timeout` exists, but the two-step form is at least as
+ * common and is what stripe-node uses. Reading only the options object reported no-timeout at
+ * error severity against a call that is correctly protected.
+ *
+ * This gap predates the expression-client work but was largely invisible, because the calls that
+ * exhibit it were themselves being skipped. Resolving those calls surfaced it immediately, on the
+ * first repository tried.
+ *
+ * Two spellings, both required: chained off the call, and set on a variable the call was assigned
+ * to. The search for the second is confined to the nearest enclosing function, so an unrelated
+ * `req` in a different function cannot vouch for this one.
+ */
+function clientRequestTimeout(call: CallExpression): number | 'instance-default' | undefined {
+  const msOf = (setTimeoutCall: Node | undefined): number | 'instance-default' => {
+    const args = setTimeoutCall?.asKind(SyntaxKind.CallExpression)?.getArguments() ?? []
+    const first = args[0]
+    if (first?.getKind() === SyntaxKind.NumericLiteral) {
+      const n = Number(first.getText().replace(/_/g, ''))
+      // `setTimeout(0)` disables the socket timeout, exactly like `timeout: 0` in a config.
+      return n === 0 ? 'instance-default' : n
+    }
+    return 'instance-default'
+  }
+
+  // `http.request(opts).setTimeout(5000)`
+  const parent = call.getParent()
+  if (parent?.getKind() === SyntaxKind.PropertyAccessExpression) {
+    const pae = parent.asKindOrThrow(SyntaxKind.PropertyAccessExpression)
+    if (pae.getName() === 'setTimeout') return msOf(pae.getParent())
+  }
+
+  // `const req = http.request(opts)` followed by `req.setTimeout(ms)`
+  const decl = call.getFirstAncestorByKind(SyntaxKind.VariableDeclaration)
+  if (!decl || decl.getInitializer() !== call) return undefined
+  const name = decl.getNameNode()
+  if (name.getKind() !== SyntaxKind.Identifier) return undefined
+  const local = name.getText()
+  const scope =
+    call.getFirstAncestor((a: Node) => FN_LIKE_FOR_TIMEOUT.has(a.getKind())) ?? call.getSourceFile()
+  for (const pa of scope.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+    if (pa.getName() !== 'setTimeout') continue
+    if (pa.getExpression().getText() !== local) continue
+    const c = pa.getParent()
+    if (c?.getKind() === SyntaxKind.CallExpression) return msOf(c)
+  }
+  return undefined
+}
+
+const FN_LIKE_FOR_TIMEOUT = new Set([
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.FunctionExpression,
+  SyntaxKind.ArrowFunction,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.Constructor,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.SetAccessor,
+])
+
 export function resolveOptions(
   call: CallExpression,
   binding: ClientBinding,
@@ -575,6 +637,13 @@ export function resolveOptions(
   // binding.instanceTimeout still wins over a merely-absent timeout. It does NOT override
   // 'unknown': an unreadable config argument stays 'unknown' rather than being upgraded to
   // 'instance-default', which is fine either way since no-timeout only fires on `null`.
+  // A ClientRequest deadline set after the call, which no config object can show. Only node:http
+  // returns one, so only node:http is asked.
+  if (timeoutMs === null && binding.kind === 'node:http') {
+    const viaRequest = clientRequestTimeout(call)
+    if (viaRequest !== undefined) timeoutMs = viaRequest
+  }
+
   if (timeoutMs === null && binding.instanceTimeout) timeoutMs = 'instance-default'
 
   // Same absent-vs-unreadable split as timeoutMs above, except binding.kind === 'got' and

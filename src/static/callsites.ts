@@ -18,7 +18,7 @@ import {
   type VariableDeclaration,
 } from 'ts-morph'
 import type { CallSite, ClientBinding, Workspace } from '../model.js'
-import { bindingNameOf } from './clients.js'
+import { bindingNameOf, resolveExpressionToClient } from './clients.js'
 import { collectFileImports } from './imports.js'
 import { configMethod, isCallbackArg, resolveOptions } from './options.js'
 import { classifyUrl } from './urls.js'
@@ -385,6 +385,15 @@ export function findCallSites(
       }
     } else {
       b = binding ? clients.get(binding) : undefined
+      // The callee's head is matched as SOURCE TEXT, so anything that is not a plain name missed
+      // and the call was skipped with no diagnostic: `(insecure ? http : https).request(...)` was
+      // looked up under the binding name "(insecure ? http : https)". Resolve the head as an
+      // expression instead, for the shapes where every branch is the same client. See #6.
+      if (!b && expr.getKind() === SyntaxKind.PropertyAccessExpression)
+        b = resolveExpressionToClient(
+          expr.asKindOrThrow(SyntaxKind.PropertyAccessExpression).getExpression(),
+          clients,
+        )
     }
     if (!b) continue
     // A factory binding builds a client; calling it makes no request. `create({...})` and

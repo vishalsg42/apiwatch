@@ -334,6 +334,114 @@ export const bindsAnImportedClient = (clients: Map<string, ClientBinding>): bool
 export const bindingNameOf = (text: string): string =>
   text.startsWith('this.') ? text.slice(5) : text
 
+/**
+ * The client an EXPRESSION evaluates to, when that can be decided syntactically.
+ *
+ * A call site's client is normally found by matching the callee's source text against a binding
+ * name, so anything that is not a plain name matched nothing and the call was skipped in silence:
+ * no call site, and no counter recording that one was dropped. See #6.
+ *
+ * Only shapes where every branch that could be taken resolves to the SAME client kind are
+ * accepted. A conditional whose arms are different clients, or whose arms include something
+ * unknown, returns undefined and the call goes on being skipped, because guessing which arm runs
+ * would invent a call site rather than find one.
+ *
+ * The unwrapped forms, each of which is a spelling of "this value is that client":
+ *
+ *   (expr)                  parentheses, which is how a conditional callee must be written
+ *   expr as T, <T>expr      a cast changes the type and not the value
+ *   expr!                   likewise
+ *   expr.default            the CJS interop shape, `require('axios').default`
+ *   a || b, a ?? b          a fallback chain, where both sides are the same client
+ *   c ? a : b               a runtime choice between two spellings of one client
+ *
+ * The reproduction is stripe-node, which needs the whole set at once:
+ *
+ *   const http = ((http_ as unknown) as {default: typeof http_}).default || http_
+ *   (isInsecureConnection ? http : https).request({...})
+ *
+ * The binding is a cast, a `.default` and a `||`; the call head is a parenthesized conditional.
+ * Resolving only the conditional would still have found nothing, because its arms are the derived
+ * locals rather than the namespace imports.
+ */
+export function resolveExpressionToClient(
+  node: Node | undefined,
+  clients: Map<string, ClientBinding>,
+): ClientBinding | undefined {
+  if (!node) return undefined
+  switch (node.getKind()) {
+    case SyntaxKind.ParenthesizedExpression:
+    case SyntaxKind.AsExpression:
+    case SyntaxKind.TypeAssertionExpression:
+    case SyntaxKind.SatisfiesExpression:
+    case SyntaxKind.NonNullExpression:
+      return resolveExpressionToClient(
+        (node as unknown as { getExpression(): Node }).getExpression(),
+        clients,
+      )
+    case SyntaxKind.Identifier:
+      return clients.get(bindingNameOf(node.getText()))
+    case SyntaxKind.PropertyAccessExpression: {
+      const pae = node.asKindOrThrow(SyntaxKind.PropertyAccessExpression)
+      // `mod.default` is the same object as `mod` under CJS interop. Any other property is a
+      // different value and must not inherit the client.
+      if (pae.getName() !== 'default') return clients.get(bindingNameOf(node.getText()))
+      return resolveExpressionToClient(pae.getExpression(), clients)
+    }
+    case SyntaxKind.BinaryExpression: {
+      const be = node.asKindOrThrow(SyntaxKind.BinaryExpression)
+      const op = be.getOperatorToken().getKind()
+      if (op !== SyntaxKind.BarBarToken && op !== SyntaxKind.QuestionQuestionToken) return undefined
+      return agree(
+        resolveExpressionToClient(be.getLeft(), clients),
+        resolveExpressionToClient(be.getRight(), clients),
+      )
+    }
+    case SyntaxKind.ConditionalExpression: {
+      const ce = node.asKindOrThrow(SyntaxKind.ConditionalExpression)
+      return agree(
+        resolveExpressionToClient(ce.getWhenTrue(), clients),
+        resolveExpressionToClient(ce.getWhenFalse(), clients),
+      )
+    }
+    case SyntaxKind.CallExpression: {
+      // An inline `require('node:http')`, which is how a CJS file can pick a client without ever
+      // naming it: `(secure ? require('node:https') : require('node:http')).request(...)`. Only a
+      // whole-module require, since a property form assigned to a variable is already handled
+      // where bindings are collected. Every other call is opaque, and stays so.
+      const shape = requireShape(node)
+      const kind = shape && shape.property === undefined ? TABLE[shape.specifier] : undefined
+      return kind ? bind(shape?.specifier ?? '', kind, 'import') : undefined
+    }
+    default:
+      // Everything else is opaque: an element access, an await, a non-require call. Abstaining
+      // here is the whole point, since a wrong client is a fabricated finding.
+      return undefined
+  }
+}
+
+/**
+ * Two branches of one expression, reconciled.
+ *
+ * Both must resolve, and to the same kind. The instance-level flags are OR-ed rather than
+ * AND-ed: if either branch carries a timeout, this call may well be protected, and reporting
+ * no-timeout on it would be an error-severity false positive on correctly protected code, which
+ * this project ranks above the silent suppression that the other choice would cause.
+ */
+function agree(
+  a: ClientBinding | undefined,
+  b: ClientBinding | undefined,
+): ClientBinding | undefined {
+  if (!a || !b || a.kind !== b.kind) return undefined
+  if (a.origin === 'factory' || b.origin === 'factory') return undefined
+  return {
+    ...a,
+    instanceTimeout: a.instanceTimeout || b.instanceTimeout,
+    instanceRetry: a.instanceRetry || b.instanceRetry,
+    boundMethod: a.boundMethod === b.boundMethod ? a.boundMethod : undefined,
+  }
+}
+
 export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   const out = new Map<string, ClientBinding>()
 
@@ -437,6 +545,21 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
               ),
             )
         }
+        continue
+      }
+    }
+
+    // `const http = ((http_ as unknown) as {default: typeof http_}).default || http_`
+    //
+    // A client re-bound through casts, a `.default` interop hop or a `||` fallback. Without this
+    // the local is not a client, and neither is any call through it. Only the shapes where every
+    // branch resolves to the same kind are accepted; see resolveExpressionToClient.
+    const viaExpr = resolveExpressionToClient(init, out)
+    if (viaExpr) {
+      const local = v.getName()
+      // Skip a self-referential re-bind of the same name, which would be a no-op anyway.
+      if (local !== viaExpr.name) {
+        out.set(local, { ...viaExpr, name: local })
         continue
       }
     }
