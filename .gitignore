@@ -3,3 +3,9 @@ dist/
 .apiwatch/
 coverage/
 .superpowers/
+
+# macOS
+.DS_Store
+
+# npm pack output
+*.tgz
