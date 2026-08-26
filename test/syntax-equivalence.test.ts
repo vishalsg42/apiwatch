@@ -65,13 +65,26 @@ const spellings = (key: string, value: string) => [
 ]
 
 describe('spellings of one config object are analysed identically', () => {
-  for (const [label, call] of [
+  for (const [label, call, expected] of [
     [
       'axios timeout',
       (cfg: string) =>
         `import axios from 'axios'\nexport const f = () => axios.get('https://v.dev/a', ${cfg})`,
+      // `AxiosRequestConfig.timeout` is real, so this one really is a 5s deadline.
+      5000,
     ],
-    ['fetch timeout', (cfg: string) => `export const f = () => fetch('https://v.dev/a', ${cfg})`],
+    [
+      'fetch timeout',
+      (cfg: string) => `export const f = () => fetch('https://v.dev/a', ${cfg})`,
+      // `RequestInit` has no `timeout`. The standard fetch ignores the key, so the call has no
+      // deadline at all and null (PROVEN ABSENT) is the right answer.
+      //
+      // This line read 5000 until the conformance check found otherwise, which makes it the
+      // second instance of the trap named at the top of this file: the oracle of the test written
+      // to catch defects nobody imagined had itself encoded one. An equivalence property needs no
+      // oracle; only this one extra assertion did, and only this one extra assertion was wrong.
+      null,
+    ],
   ] as const) {
     it(`${label}: quoting and formatting never change the verdict`, async () => {
       const results = await Promise.all(
@@ -84,7 +97,7 @@ describe('spellings of one config object are analysed identically', () => {
       for (const r of results)
         expect(JSON.stringify(r.got), `${r.cfg} disagreed with ${results[0].cfg}`).toBe(first)
       // and the shared answer must be the RIGHT one, or agreeing on nonsense would pass
-      expect(results[0].got[0]?.timeoutMs).toBe(5000)
+      expect(results[0].got[0]?.timeoutMs).toBe(expected)
     })
   }
 

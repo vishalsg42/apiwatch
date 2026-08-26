@@ -383,8 +383,9 @@ function isInManualRetryLoop(call: CallExpression): boolean {
 }
 
 /**
- * The config keys that PROVE retry, per client. A key only proves anything if the client it is
- * handed to actually implements it.
+ * What each client actually implements, per config key. A key only proves anything if the client
+ * it is handed to reads it; otherwise it is inert, and treating it as proof silently suppresses a
+ * real finding.
  *
  * `retry`/`retries` used to count for every client. Only got has such an option:
  * `AxiosRequestConfig` declares no `retry` key and neither does `RequestInit`, so
@@ -392,24 +393,51 @@ function isInManualRetryLoop(call: CallExpression): boolean {
  * proof silently suppressed a real finding. Found by a blind judge qualification set, where two
  * reviewers asked only "does anything re-attempt this" both said no and were right. See #5.
  *
- * axios's entry is `axios-retry`, which is the literal per-request key axios-retry reads
- * (`{ 'axios-retry': { retries: 3 } }`). Instance-level `axiosRetry(instance, ...)` is a
- * different path and is already handled by `binding.instanceRetry`.
+ * `timeout` and `signal` were then found to have the same defect, by the conformance check that
+ * #5 prompted: `test/option-conformance.test.ts` reads the shipped type declarations of every
+ * client in this table and asserts each entry against them. That is what turned "only #5 was
+ * wrong" into the three corrections below, and it is why this table is data rather than a
+ * condition written inline at each lookup.
  *
- * An empty list means no request-level option can prove retry for that client. It does not mean
- * such calls never retry: a wrapper or an interceptor still can, which is why the verdict there
- * is a reported finding rather than a claim of certainty.
+ * `axios-retry` is the literal per-request key axios-retry reads
+ * (`{ 'axios-retry': { retries: 3 } }`), and it exists on `AxiosRequestConfig` only once
+ * axios-retry is imported, which is exactly when it does anything. Instance-level
+ * `axiosRetry(instance, ...)` is a different path, already handled by `binding.instanceRetry`.
+ *
+ * An empty `retry` list means no request-level option can prove retry for that client. It does
+ * not mean such calls never retry: a wrapper or an interceptor still can, which is why the
+ * verdict there is a reported finding rather than a claim of certainty.
  */
-const RETRY_OPTION_NAMES: Record<ClientKind, readonly string[]> = {
-  // got v11+ uses `retry: { limit }`; got v9 used `retries`. Both are genuine.
-  got: ['retry', 'retries'],
-  axios: ['axios-retry'],
-  'nestjs-axios': ['axios-retry'],
-  fetch: [],
-  'node-fetch': [],
-  request: [],
-  'request-promise': [],
-  'node:http': [],
+export type ClientOptionSupport = {
+  /** A numeric/`AbortSignal.timeout` deadline can be read off this call's own `timeout` key. */
+  timeout: boolean
+  /** `signal: AbortSignal.timeout(n)` is honoured by this client. */
+  signal: boolean
+  /** Keys whose presence proves this call re-attempts on failure. */
+  retry: readonly string[]
+}
+
+export const CLIENT_OPTIONS: Record<ClientKind, ClientOptionSupport> = {
+  // got v11+ uses `retry: { limit }`; got v9 used `retries`. Both are genuine, and `retries` is
+  // kept although it is absent from got's current types, because dropping it would fire no-retry
+  // on a v9 call that really does retry. The conformance check pins that divergence.
+  got: { timeout: true, signal: true, retry: ['retry', 'retries'] },
+  axios: { timeout: true, signal: true, retry: ['axios-retry'] },
+  'nestjs-axios': { timeout: true, signal: true, retry: ['axios-retry'] },
+  // The standard fetch has never had a `timeout`: `RequestInit` carries fourteen keys and that is
+  // not one of them, so `fetch(url, { timeout: 5000 })` sets no deadline at all. apiwatch read it
+  // as 5000ms and stayed silent on a call with no deadline, which is the #5 defect exactly.
+  fetch: { timeout: false, signal: true, retry: [] },
+  // node-fetch is the one ambiguous row. v2 implements `timeout`; v3 removed it. Which major is
+  // installed is a workspace fact and this function has no workspace, so the choice is between a
+  // silent suppression on v3 and an error-severity false positive on v2. This project ranks the
+  // false positive worse, so `timeout` stays true. `legacy-client` already reports v2 at info.
+  'node-fetch': { timeout: true, signal: true, retry: [] },
+  // `request` predates AbortSignal and never gained it: `CoreOptions` has `timeout` and no
+  // `signal`, so a signal passed here aborts nothing.
+  request: { timeout: true, signal: false, retry: [] },
+  'request-promise': { timeout: true, signal: false, retry: [] },
+  'node:http': { timeout: true, signal: true, retry: [] },
 }
 
 /**
@@ -451,6 +479,9 @@ export function resolveOptions(
 ): Pick<CallOptions, 'timeoutMs' | 'retry' | 'retryReason'> {
   const arg = configArg(call, binding)
   const config = arg.kind === 'object' ? arg.node : undefined
+  // What this client actually implements. A key it does not read proves nothing, so an inert
+  // one must not be looked up at all. See CLIENT_OPTIONS.
+  const support = CLIENT_OPTIONS[binding.kind]
   // A readable object that nonetheless hides keys behind a spread. Absence and disablement
   // become unprovable; explicit properties are still read. See hasSpread.
   // `extra` are object literals a readable spread can contribute; look them up as though they
@@ -477,7 +508,7 @@ export function resolveOptions(
   // PROVEN-ABSENT values below, same as before this fix.
   let timeoutMs: CallOptions['timeoutMs'] = arg.kind === 'unreadable' ? 'unknown' : null
   if (config) {
-    const t = lookup('timeout')
+    const t = support.timeout ? lookup('timeout') : undefined
     if (t) {
       if (!t.shorthand && t.initializer.getKind() === SyntaxKind.NumericLiteral) {
         const n = Number(t.initializer.getText())
@@ -509,7 +540,7 @@ export function resolveOptions(
   // resolved to null (PROVEN ABSENT) and fired no-timeout at error severity on protected code.
   // `timeout: 0` with no signal still resolves to null, because that genuinely is no deadline.
   if (config && timeoutMs === null) {
-    const sig = lookup('signal')
+    const sig = support.signal ? lookup('signal') : undefined
     if (sig) {
       const m = !sig.shorthand
         ? // [\d_] not \d: JavaScript numeric separators are legal and common in timeout
@@ -555,7 +586,7 @@ export function resolveOptions(
       : arg.kind === 'unreadable'
         ? 'unreadable'
         : 'absent'
-  const retryNames = RETRY_OPTION_NAMES[binding.kind]
+  const retryNames = support.retry
   // An explicit, readable key wins over a client default: `got(url, { retry: { limit: 3 } })` is
   // 'explicit', not 'client-default', because the call said so rather than inheriting it.
   if (retry !== 'unknown' && config && retryNames.some((n) => lookup(n))) {
