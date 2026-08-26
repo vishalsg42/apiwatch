@@ -330,11 +330,17 @@ export function detectClients(sf: SourceFile): Map<string, ClientBinding> {
   for (const d of sf.getImportDeclarations()) {
     const kind = TABLE[d.getModuleSpecifierValue()]
     if (!kind) continue
+    // `import type http from 'node:http'` erases at compile time and binds nothing at runtime.
+    // The named branch below has always checked this; the default and namespace branches did not,
+    // so a type-only import registered a callable client. apiwatch matches call sites by NAME
+    // rather than by type, so a file importing the type and separately holding a local of the
+    // same name had that local's calls attributed to a client it never touched.
+    if (d.isTypeOnly()) continue
     const def = d.getDefaultImport()?.getText()
     if (def) out.set(def, bind(def, kind, 'import'))
     for (const n of d.getNamedImports()) {
       // A type-only specifier never produces a runtime binding.
-      if (n.isTypeOnly() || d.isTypeOnly()) continue
+      if (n.isTypeOnly()) continue
       const imported = n.getName()
       const local = n.getAliasNode()?.getText() ?? imported
       if (isClientFactory(kind, imported)) out.set(local, bind(local, kind, 'factory'))

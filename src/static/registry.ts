@@ -40,8 +40,12 @@ export function resolveClients(sf: SourceFile, reg: Map<string, ClientBinding>) 
     const spec = d.getModuleSpecifierValue()
     if (!spec.startsWith('.')) continue
     const target = stripExt(resolve(dir, spec))
-    for (const n of d.getNamedImports())
+    // Same rule as detectClients: a type-only import erases and binds nothing at runtime.
+    if (d.isTypeOnly()) continue
+    for (const n of d.getNamedImports()) {
+      if (n.isTypeOnly()) continue
       apply(local, reg, target, n.getName(), n.getAliasNode()?.getText() ?? n.getName())
+    }
     // `import client from './http'` against `export default ...`. Omitting this made every
     // consumer of a default-exported client report zero call sites, silently.
     const def = d.getDefaultImport()
