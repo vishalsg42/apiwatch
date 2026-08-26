@@ -36,6 +36,16 @@ const audit = async (src: string) => {
   }
 }
 
+/** Verb plus resolved timeout, which is what the config-index tests turn on. */
+const auditSites = async (src: string) => {
+  const dir = mkdtempSync(join(tmpdir(), 'apiwatch-cjs-'))
+  mkdirSync(join(dir, 'src'))
+  writeFileSync(join(dir, 'package.json'), '{"name":"c","dependencies":{"axios":"^1.7.0"}}')
+  writeFileSync(join(dir, 'src', 'a.ts'), src)
+  const { sites } = await runAudit({ root: dir, json: true })
+  return sites.map((s) => ({ method: s.method, timeoutMs: s.options.timeoutMs }))
+}
+
 describe('a verb destructured from a CJS client module binds that verb', () => {
   it('binds the verb and records it, so a POST is not treated as idempotent', async () => {
     const r = await audit(
@@ -93,6 +103,61 @@ describe('a verb destructured from a CJS client module binds that verb', () => {
     expect(r.sites).toEqual([{ client: 'axios', method: 'get' }])
     // the instance sets a deadline, so the destructured verb must not report one missing
     expect(r.rules).not.toContain('no-timeout')
+  })
+})
+
+/**
+ * A destructured verb must also name itself to the config reader, because axios decides WHICH
+ * argument is the config from the method: `get(url, config)` puts it at 1, `post(url, data,
+ * config)` at 2.
+ *
+ * Binding the verbs without threading the verb into that decision made `post`, `put` and `patch`
+ * fall through to the shape probe, which expects the two-argument form and picked argument 1: the
+ * request BODY. `post(url, data, { timeout: 2000 })` then resolved to a PROVEN-ABSENT timeout and
+ * reported no-timeout at error severity on a call that plainly sets one. That is the worst
+ * failure this project has, and it was introduced by the commit that added the verbs.
+ */
+describe('a destructured verb resolves its config from the right argument', () => {
+  const cases = [
+    { verb: 'get', call: "get('https://v.dev/a', { timeout: 1000 })", ms: 1000 },
+    { verb: 'head', call: "head('https://v.dev/c', { timeout: 6000 })", ms: 6000 },
+    { verb: 'post', call: "post('https://v.dev/d', { x: 1 }, { timeout: 2000 })", ms: 2000 },
+    { verb: 'put', call: "put('https://v.dev/e', { x: 1 }, { timeout: 3000 })", ms: 3000 },
+    { verb: 'patch', call: "patch('https://v.dev/f', { x: 1 }, { timeout: 4000 })", ms: 4000 },
+  ] as const
+
+  for (const c of cases) {
+    it(`${c.verb} reads its timeout, not the request body`, async () => {
+      const r = await auditSites(
+        [`const { ${c.verb} } = require('axios')`, `export const f = () => ${c.call}`].join('\n'),
+      )
+      expect(r).toEqual([{ method: c.verb, timeoutMs: c.ms }])
+    })
+  }
+
+  it('the same holds for a verb pulled off a create() instance', async () => {
+    const r = await auditSites(
+      [
+        "const axios = require('axios')",
+        "const api = axios.create({ baseURL: 'https://v.dev' })",
+        'const { post } = api',
+        "export const f = () => post('/d', { x: 1 }, { timeout: 7000 })",
+      ].join('\n'),
+    )
+    expect(r).toEqual([{ method: 'post', timeoutMs: 7000 }])
+  })
+
+  /**
+   * axios has `delete`, not `del`. `del` is the request family's spelling, so binding it for axios
+   * would invent a client that does not exist.
+   */
+  it('axios has no `del`, so destructuring one binds nothing', async () => {
+    const r = await auditSites(
+      ["const { del } = require('axios')", "export const f = () => del('https://v.dev/b')"].join(
+        '\n',
+      ),
+    )
+    expect(r).toEqual([])
   })
 })
 

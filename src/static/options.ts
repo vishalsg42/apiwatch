@@ -289,10 +289,18 @@ const axiosShapeProbed = (m: string | undefined) => m === undefined || m === 're
 
 function configArg(call: CallExpression, binding: ClientBinding): ConfigArg {
   if (SHAPE_PROBED.has(binding.kind)) return probeConfigArg(call)
-  const method = methodOf(call)
+  // A destructured verb is an IDENTIFIER call, so methodOf finds no property access and the verb
+  // has to come from the binding. Without it `const { post } = require('axios')` fell through to
+  // the shape probe, which expects the two-argument form, and picked argument 1: the request
+  // BODY. A `post(url, data, { timeout })` then read as having no timeout at all, PROVEN absent,
+  // which is an error-severity false positive on correctly protected code.
+  //
+  // methodOf first, because it describes THIS call while boundMethod describes the binding. Same
+  // precedence as the `method ??= b.boundMethod` in callsites.ts, so the two cannot disagree.
+  const method = methodOf(call) ?? binding.boundMethod
   if ((binding.kind === 'axios' || binding.kind === 'nestjs-axios') && axiosShapeProbed(method))
     return probeConfigArg(call)
-  const idx = configArgIndex(binding.kind, methodOf(call))
+  const idx = configArgIndex(binding.kind, method)
   if (idx === undefined) return { kind: 'absent' }
   const arg = call.getArguments()[idx]
   if (!arg) return { kind: 'absent' }

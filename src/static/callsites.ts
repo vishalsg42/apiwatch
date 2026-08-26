@@ -391,10 +391,11 @@ export function findCallSites(
     // evidence printed `request-promise()` and no-retry fired on a POST, because `undefined` is
     // idempotent by design. The binding remembers what it was imported as.
     //
-    // NOTE: deliberately NOT threaded into options.ts. The three clients with ambiguous overloads
-    // now resolve their config argument by argument SHAPE, so they never consult the method, and
-    // no other client exposes a verb as a named export (see CLIENT_EXPORTS). Adding it there would
-    // be dead code that no test can distinguish.
+    // NOTE: this IS threaded into options.ts, and the note here used to say the opposite. It was
+    // true while the only clients exposing a verb as a named export were the shape-probed ones,
+    // which never consult the method. Binding axios's CJS verbs (#7) made it false in the same
+    // commit that introduced them: axios decides its config INDEX from the method, so a
+    // destructured `post` that could not name itself had its request body read as its config.
     method ??= b.boundMethod
     method ??= configMethod(call, b)
 
