@@ -30,3 +30,46 @@ describe('dependency versions resolve against the package that owns the file', (
     ])
   })
 })
+
+/**
+ * The root is normalized once, at discovery, because everything downstream keys off its text.
+ *
+ * A trailing slash broke two things at the same time and neither loudly. File paths are made
+ * repo-relative by stripping `${root}/`, so the failed prefix match fell back to the ABSOLUTE
+ * path, which is machine-specific and is what a baseline stores; and dependenciesByDir is keyed
+ * by directories beneath the root, so every per-package lookup missed and legacy-client silently
+ * vanished.
+ *
+ * The CLI resolves --root before it gets here, so no command could reach this. It was reachable
+ * by calling runAudit or discoverWorkspace directly, which is how it was found, and normalizing
+ * at the single place that establishes the root closes it for both.
+ */
+describe('the workspace root is normalized however it is spelled', () => {
+  const spellings = ['', '/', '//'] as const
+
+  it('a trailing slash changes neither the findings nor the paths', async () => {
+    const runs = await Promise.all(
+      spellings.map(async (suffix) => {
+        const { model, sites } = await runAudit({
+          root: `${fx('monorepo-node-fetch')}${suffix}`,
+          json: true,
+        })
+        return {
+          legacy: model.findings
+            .filter((f) => f.rule === 'legacy-client')
+            .map((f) => f.file)
+            .sort(),
+          files: [...new Set(sites.map((s) => s.file))].sort(),
+        }
+      }),
+    )
+    for (const [i, r] of runs.entries())
+      expect(JSON.stringify(r), `root with "${spellings[i]}" disagreed`).toBe(
+        JSON.stringify(runs[0]),
+      )
+    // and the shared answer is the right one, not an agreed-on absence
+    expect(runs[0].legacy).toEqual(['packages/aaa/src/a.ts'])
+    // paths stay repo-relative; an absolute one here is machine-specific and ends up in baselines
+    for (const f of runs[0].files) expect(f.startsWith('/')).toBe(false)
+  })
+})

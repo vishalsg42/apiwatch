@@ -1,6 +1,6 @@
 import type { Dirent } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
-import { join, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import type { Workspace } from '../model.js'
 
 const SKIP_DIRS = new Set([
@@ -68,9 +68,19 @@ export type DiscoverOptions = {
 }
 
 export async function discoverWorkspace(
-  root: string,
+  rootIn: string,
   opts: DiscoverOptions = {},
 ): Promise<Workspace> {
+  // One place normalizes the root, because everything downstream keys off its exact text. File
+  // paths are made repo-relative by stripping `${root}/` as a prefix, and dependenciesByDir is
+  // keyed by directories beneath it. A trailing slash broke both at once: the prefix match failed,
+  // so every path fell back to ABSOLUTE (machine-specific, and baselines store it), and every
+  // per-package dependency lookup missed, silently dropping legacy-client. resolve() also folds
+  // interior duplicate separators, `..` and a relative input.
+  //
+  // The CLI already resolves --root, so this was reachable only by calling discoverWorkspace or
+  // runAudit directly. Normalizing here makes it unreachable from either.
+  const root = resolve(rootIn)
   let unreadableDirs = 0
   const sourceFiles: string[] = [],
     nonShipping: string[] = [],
