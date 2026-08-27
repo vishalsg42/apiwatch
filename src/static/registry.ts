@@ -3,6 +3,7 @@ import { type ObjectBindingPattern, type Project, type SourceFile, SyntaxKind } 
 import type { ClientBinding } from '../model.js'
 import { detectClients, importedName } from './clients.js'
 import { requireSpecifier } from './imports.js'
+import { EMPTY_NEST_MODULES, moduleTimeoutFor, type NestModules } from './nestjs.js'
 
 const key = (file: string, name: string) => `${file}#${name}`
 const stripExt = (p: string) => p.replace(/\.(m|c)?[jt]sx?$/, '')
@@ -32,9 +33,23 @@ function apply(
   if (hit) local.set(localName, hit)
 }
 
-export function resolveClients(sf: SourceFile, reg: Map<string, ClientBinding>) {
+export function resolveClients(
+  sf: SourceFile,
+  reg: Map<string, ClientBinding>,
+  nest: NestModules = EMPTY_NEST_MODULES,
+) {
   const local = detectClients(sf)
   const dir = dirname(sf.getFilePath())
+
+  // A NestJS timeout is configured where the module is wired, not where the call is written, so
+  // it cannot be read from this file alone. Rebound rather than mutated: a binding reached
+  // through the registry is shared, and stamping a module verdict onto it would leak into every
+  // other file that resolves the same export. See #8.
+  const verdict = moduleTimeoutFor(nest, sf.getFilePath())
+  if (verdict)
+    for (const [name, b] of local)
+      if (b.kind === 'nestjs-axios')
+        local.set(name, { ...b, moduleTimeout: verdict === 'configured' ? 'set' : 'unknown' })
 
   for (const d of sf.getImportDeclarations()) {
     const spec = d.getModuleSpecifierValue()

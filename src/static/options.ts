@@ -646,6 +646,11 @@ export function resolveOptions(
 
   if (timeoutMs === null && binding.instanceTimeout) timeoutMs = 'instance-default'
 
+  // A NestJS module registration configures the axios instance the same way create() does, so a
+  // read one is an instance default. An unread one ('unknown') only rules out proof of absence.
+  if (timeoutMs === null && binding.moduleTimeout)
+    timeoutMs = binding.moduleTimeout === 'set' ? 'instance-default' : 'unknown'
+
   // Same absent-vs-unreadable split as timeoutMs above, except binding.kind === 'got' and
   // binding.instanceRetry still win unconditionally, exactly as before this fix: a resolved
   // client-level guarantee is trusted even when THIS call's own config can't be read.

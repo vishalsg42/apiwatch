@@ -203,8 +203,10 @@ That is a deliberate trade: it misses things rather than inventing them. The hea
   `(insecure ? http : https).request(...)` is found, but `clients[name].get(...)` is not: which
   client a map returns is a runtime fact. A run that finds nothing anywhere names the files that
   imported a client, so a zero is not left unexplained.
-- **Framework-level timeouts.** `HttpModule.register({ timeout })` in NestJS is invisible, so calls
-  through it report `no-timeout` despite being protected.
+- **Framework-level timeouts.** A NestJS `HttpModule.register({ timeout })` is followed to that
+  module's providers and controllers, and through a wrapper that re-exports it. A bare
+  `imports: [HttpModule]` still reports, because it resolves to a different, unconfigured client.
+  `registerAsync` abstains rather than confirms.
 - **Hand-rolled retry loops make `no-retry` abstain**, but they do not count as retry.
 
 Each of these is measured, with the reproduction and the cost. [Read the full list](./docs/limitations.md).

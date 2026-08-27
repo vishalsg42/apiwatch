@@ -10,6 +10,7 @@ import { renderTty } from '../report/tty.js'
 import { runRules } from '../rules/index.js'
 import { findCallSites, repoRelative } from '../static/callsites.js'
 import { bindsAnImportedClient } from '../static/clients.js'
+import { buildNestModules } from '../static/nestjs.js'
 import { createProjects } from '../static/project.js'
 import { buildRegistry, resolveClients } from '../static/registry.js'
 import { discoverWorkspace } from '../workspace/discover.js'
@@ -34,6 +35,8 @@ export async function runAudit(
   })
   const projects = createProjects(ws)
   const registry = buildRegistry(projects)
+  // Cross-file, so it is built once per run alongside the client registry. See #8.
+  const nest = buildNestModules(projects)
   const sites: CallSite[] = []
   // A file that could not even be opened counts as skipped, exactly like one that threw during
   // analysis. Both mean the run did not see everything, which is what the baseline gates on.
@@ -52,7 +55,7 @@ export async function runAudit(
   for (const { project } of projects)
     for (const sf of project.getSourceFiles()) {
       try {
-        const clients = resolveClients(sf, registry)
+        const clients = resolveClients(sf, registry, nest)
         const found = findCallSites(sf, clients, ws)
         sites.push(...found)
         if (found.length === 0 && bindsAnImportedClient(clients))

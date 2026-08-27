@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { Project, type SourceFile } from 'ts-morph'
 import type { CallSite, Workspace } from '../src/model.js'
 import { findCallSites } from '../src/static/callsites.js'
+import { buildNestModules } from '../src/static/nestjs.js'
 import { createProjects } from '../src/static/project.js'
 import { buildRegistry, resolveClients } from '../src/static/registry.js'
 import { classifyUrl } from '../src/static/urls.js'
@@ -34,19 +35,21 @@ export async function projectsFor(fixture: string) {
 export async function clientsFor(fixture: string, file: string) {
   const { projects } = await projectsFor(fixture)
   const registry = buildRegistry(projects)
+  const nest = buildNestModules(projects)
   const sf = projects
     .flatMap((p) => p.project.getSourceFiles())
     .find((s) => s.getFilePath().endsWith(file)) as SourceFile
-  return resolveClients(sf, registry)
+  return resolveClients(sf, registry, nest)
 }
 
 export async function sitesFor(fixture: string, file: string) {
   const { w, projects } = await projectsFor(fixture)
   const registry = buildRegistry(projects)
+  const nest = buildNestModules(projects)
   const sf = projects
     .flatMap((p) => p.project.getSourceFiles())
     .find((s) => s.getFilePath().endsWith(file)) as SourceFile
-  return findCallSites(sf, resolveClients(sf, registry), w)
+  return findCallSites(sf, resolveClients(sf, registry, nest), w)
 }
 
 export async function siteAt(fixture: string, file: string, match: RegExp) {

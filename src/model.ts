@@ -83,6 +83,13 @@ export type ClientBinding = {
   instanceTimeout: boolean // the create() call set a timeout
   instanceRetry: boolean // axios-retry / retry config bound to this instance
   exportedAs?: string // set when the binding is exported, for cross-module use
+  /**
+   * A NestJS timeout configured where the module is wired rather than where the call is written:
+   * `@Module({ imports: [HttpModule.register({ timeout: 5000 })], providers: [CatsService] })`.
+   * `set` was read off the registration, `unknown` means an HttpModule is wired but its options
+   * could not be read. Only ever set for `nestjs-axios`. See static/nestjs.ts and #8.
+   */
+  moduleTimeout?: 'set' | 'unknown'
 }
 
 export type CallSite = {

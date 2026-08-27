@@ -64,7 +64,7 @@ const VERBS = new Set([
 const verbOf = (imported: string): string | undefined =>
   VERBS.has(imported) ? (imported === 'del' ? 'delete' : imported) : undefined
 
-const TIMEOUT_PROPS = new Set(['timeout'])
+export const TIMEOUT_PROPS = new Set(['timeout'])
 const RETRY_PROPS = new Set(['retry', 'retries'])
 
 /**
@@ -79,7 +79,7 @@ const RETRY_PROPS = new Set(['retry', 'retries'])
  * disabled. A non-literal value cannot be read statically, and a value we cannot read is not
  * proof of absence, so it still counts as present.
  */
-function hasEnabledProp(obj: ObjectLiteralExpression, names: Set<string>): boolean {
+export function hasEnabledProp(obj: ObjectLiteralExpression, names: Set<string>): boolean {
   for (const p of obj.getProperties()) {
     const kind = p.getKind()
     if (kind === SyntaxKind.ShorthandPropertyAssignment) {
