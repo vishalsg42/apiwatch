@@ -141,14 +141,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      # Pinned to an EXACT version on purpose: apiwatch@0.4.0, never apiwatch@0.4. A range
+      # Pinned to an EXACT version on purpose: apiwatch@0.5.0, never apiwatch@0.5. A range
       # upgrades you the moment a release publishes, so CI can go red with no change on your
       # side. apiwatch is pre-1.0, and a patch release can legitimately add findings (0.3.3
       # made three CommonJS import shapes visible) or change finding identity (0.3.5 bumped
       # fingerprintVersion, which invalidates every baseline entry).
       # If new findings appear, `apiwatch baseline accept` takes them. If the identity changed,
       # accept CANNOT work; see Upgrading below for the review-then-regenerate sequence.
-      - run: npx apiwatch@0.4.0 audit --baseline .apiwatch-baseline.json --fail-on error
+      - run: npx apiwatch@0.5.0 audit --baseline .apiwatch-baseline.json --fail-on error
 ```
 
 The baseline survives ordinary work: inserting lines, reformatting, reordering calls, renaming a
@@ -188,7 +188,8 @@ apiwatch baseline --out .apiwatch-baseline.json    # regenerates over the stale 
 ```
 
 The regeneration reports how many `error`-severity findings it absorbed, so a genuine one cannot
-slip through as a line in a count. 0.3.5 is the current example.
+slip through as a line in a count. **0.5.0 is the current example: it bumps `fingerprintVersion`
+from 2 to 3, so every baseline written by 0.4.x or earlier must be regenerated this way.**
 
 ## Limitations
 

@@ -7,6 +7,79 @@ apiwatch is pre-1.0, so minor versions may change behaviour. Each entry says whe
 more findings or fewer after upgrading, because a change in finding count is otherwise
 indistinguishable from a regression.
 
+## 0.5.0 (2026-08-27)
+
+**This release INVALIDATES every baseline, and it changes finding counts in BOTH directions.**
+`fingerprintVersion` goes from 2 to 3, so `accept` cannot carry a 0.4.x baseline across. `audit`,
+`accept` and `prune` all stop with instructions rather than comparing incomparable keys. Review
+before regenerating, because regenerating accepts everything currently visible:
+
+```bash
+apiwatch audit --fail-on error                     # no --baseline: see everything, new included
+apiwatch baseline --out .apiwatch-baseline.json    # regenerates over the stale file
+```
+
+What actually moved the fingerprint is small: a route label or a config `method` written with
+backticks now keys on its value, as a quoted one always did. Measured on 464 call sites carrying
+1,414 backtick route labels, **no fingerprint moved**, so most repositories will regenerate to the
+same set they had. The whole hash is versioned anyway, because the alternative is a baseline that
+silently loses exactly its backtick entries.
+
+Six issues, five of them false negatives or false positives in NestJS and CommonJS code, plus a
+conformance check that pins the option model against the clients' own type declarations.
+
+### What changed
+
+- **A timeout registered on a NestJS module is followed to the calls it configures** (#8).
+  `HttpModule.register({ timeout })` protects every call its module's providers and controllers
+  make, and every one of them used to report `no-timeout` at `error` severity, the one rule
+  `--fail-on error` gates on. The join is module-scoped, not repository-wide: `@nestjs/core` hashes
+  a dynamic module's metadata into its token, so a bare `imports: [HttpModule]` is a different
+  instance with axios's own no-timeout default and keeps reporting. A `@Global()` module's exports
+  are followed too, since they reach every module with no `imports` edge.
+- **A call through `HttpService.axiosRef` is no longer invisible** (#14). It is the axios instance
+  the service wraps and the documented way to get a promise instead of an Observable, but the call
+  head matched no binding, so the call was skipped in silence: no call site, no counter, every rule
+  quiet. One repository reported a confident zero for its entire HTTP layer.
+- **A client reached through an expression is resolved when every branch agrees** (#6), and a run
+  that finds nothing anywhere now names the files that imported a client, so a zero is no longer
+  left unexplained.
+- **`const { get } = require('axios')` binds the verb it was imported as** (#7), on the CommonJS
+  path only, so a destructured POST is no longer treated as idempotent.
+- **A dependency version resolves against the package that owns the file** (#9), instead of a
+  merged map where the last package walked won.
+- **A type-only import binds no client**, and a trailing slash on `--root` can no longer reach the
+  path logic that keys findings.
+
+### Measured against 0.4.0
+
+Fifteen public repositories, both binaries installed from packed tarballs so a rebuild could not
+change what was being compared: **833 findings before, 851 after. One removed, nineteen added.**
+
+| repo | change |
+|---|---|
+| ufosc/Jukebox-Server | **0 to 8**: `axiosRef` made its whole HTTP layer visible, 3 `no-timeout` |
+| hackycy/sf-nest-admin | **0 to 5**: same cause, 0 `no-timeout` because a `@Global()` module registers one |
+| tugascript/nestjs-oauth | **removes 1** `no-timeout` at `error` against a module that registers 5000ms |
+| stripe/stripe-node | adds 1 `unvalidated-response`, from the expression-resolved client |
+| novuhq/novu | adds 5, from the expression-resolved client and the type-only import fix |
+| Ghost, documenso, uptime-kuma, nocodb, outline, amplication, ghostfolio, OxMarco, hyperledger, ultimate-nest | none |
+
+The two repositories that go from zero are the interesting ones, and both were checked by hand.
+ufosc's three `no-timeout` are genuine: its spotify module imports `HttpModule` bare and the calls
+pass a config carrying only headers. sf-nest-admin has none, because its `@Global()` SharedModule
+registers `timeout: 5000` and re-exports `HttpModule`; before that was modelled, those same four
+calls reported `no-timeout` at `error` severity against protected code.
+
+### Honest limits
+
+The NestJS corpus is nine repositories, most of them small, which is thinner than the six-repository
+corpus behind the other rules. `registerAsync` suppresses rather than confirms, because a factory's
+return value cannot be read. When a module reaches a configured `HttpModule` but lists its members
+through a value that cannot be read (`providers: [...USE_CASES]`), every NestJS call site in that
+repository that no module claims abstains. And `no-retry`'s recall is still unmeasured: around 80%
+of the calls it stays silent on turn out to have no retry either.
+
 ## 0.4.0 (2026-08-25)
 
 **This release ADDS findings.** `fingerprintVersion` stays at 2, so no baseline needs
