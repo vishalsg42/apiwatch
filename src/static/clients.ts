@@ -383,10 +383,22 @@ export function resolveExpressionToClient(
       return clients.get(bindingNameOf(node.getText()))
     case SyntaxKind.PropertyAccessExpression: {
       const pae = node.asKindOrThrow(SyntaxKind.PropertyAccessExpression)
-      // `mod.default` is the same object as `mod` under CJS interop. Any other property is a
-      // different value and must not inherit the client.
-      if (pae.getName() !== 'default') return clients.get(bindingNameOf(node.getText()))
-      return resolveExpressionToClient(pae.getExpression(), clients)
+      const prop = pae.getName()
+      // `mod.default` is the same object as `mod` under CJS interop.
+      if (prop === 'default') return resolveExpressionToClient(pae.getExpression(), clients)
+      // `httpService.axiosRef` IS the axios instance HttpService wraps, and reaching for it is
+      // the documented way to get a promise instead of an Observable. Gated on the base being
+      // nestjs-axios: on anything else `axiosRef` is an ordinary property, and a property is a
+      // different value that must not inherit the binding. Folded onto the same binding rather
+      // than rebound as 'axios' because the option shapes are identical (configArgIndex returns
+      // one set of indices for both) and the module-level timeout resolved for this file in
+      // static/nestjs.ts still applies: it configures the very instance axiosRef returns. See #14.
+      if (prop === 'axiosRef') {
+        const base = resolveExpressionToClient(pae.getExpression(), clients)
+        return base?.kind === 'nestjs-axios' ? base : undefined
+      }
+      // Any other property is a different value and must not inherit the client.
+      return clients.get(bindingNameOf(node.getText()))
     }
     case SyntaxKind.BinaryExpression: {
       const be = node.asKindOrThrow(SyntaxKind.BinaryExpression)

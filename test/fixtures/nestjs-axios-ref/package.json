@@ -1,0 +1,1 @@
+{ "name": "nestjs-axios-ref", "version": "1.0.0", "dependencies": { "@nestjs/axios": "^3.0.0", "axios": "^1.6.0" } }

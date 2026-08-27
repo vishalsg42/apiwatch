@@ -18,8 +18,16 @@ import { hasEnabledProp, TIMEOUT_PROPS } from './clients.js'
 export type ModuleTimeout = 'configured' | 'unknown'
 
 export type NestModules = {
-  /** Ext-stripped absolute file path -> the verdict of a module that lists it as a member. */
-  byFile: Map<string, ModuleTimeout>
+  /**
+   * Ext-stripped absolute file path -> the verdict of a module that lists it as a member.
+   * `bare` records an explicit unconfigured HttpModule import, which beats a global module.
+   */
+  byFile: Map<string, ModuleTimeout | 'bare'>
+  /**
+   * A `@Global()` module that exports a configured HttpModule. Its exports reach every module in
+   * the application with no `imports` edge, so it is the fallback for any file no module claims.
+   */
+  globalConfigured: ModuleTimeout | null
   /**
    * Some module reached a configured HttpModule but its own member list could not be read, so
    * any file could be one of its providers. Without this, a repository that writes
@@ -28,7 +36,11 @@ export type NestModules = {
   opaqueConfigured: boolean
 }
 
-export const EMPTY_NEST_MODULES: NestModules = { byFile: new Map(), opaqueConfigured: false }
+export const EMPTY_NEST_MODULES: NestModules = {
+  byFile: new Map(),
+  globalConfigured: null,
+  opaqueConfigured: false,
+}
 
 const stripExt = (p: string) => p.replace(/\.(m|c)?[jt]sx?$/, '')
 const keyOf = (file: string, name: string) => `${file}#${name}`
@@ -40,6 +52,10 @@ const stronger = (a: ModuleTimeout | null, b: ModuleTimeout | null): ModuleTimeo
 type ModuleRecord = {
   /** A timeout wired into this module's OWN imports, before following any other module. */
   own: ModuleTimeout | null
+  /** This module imports HttpModule itself but unconfigured, which beats a global export. */
+  ownBare: boolean
+  /** `@Global()`: this module's exports reach every module without an imports edge. */
+  isGlobal: boolean
   /** `exports: [HttpModule]` hands this module's HttpService to whoever imports it. */
   reexportsHttp: boolean
   /** Keys of modules named in `imports`, which may re-export a configured HttpModule. */
@@ -180,10 +196,12 @@ function collectModules(projects: { project: Project }[]): Map<string, ModuleRec
 
         const imports = arrayProp(sf, obj, 'imports')
         let own: ModuleTimeout | null = null
+        let ownBare = false
         const importedModules: string[] = []
         for (const item of imports.items) {
           const v = httpVerdict(item)
           if (v !== 'not-http') {
+            if (v === null) ownBare = true
             own = stronger(own, v)
             continue
           }
@@ -241,6 +259,8 @@ function collectModules(projects: { project: Project }[]): Map<string, ModuleRec
 
         out.set(keyOf(self, name), {
           own,
+          ownBare,
+          isGlobal: !!cls.getDecorator('Global'),
           reexportsHttp,
           importedModules,
           exportedModules,
@@ -296,24 +316,44 @@ export function buildNestModules(projects: { project: Project }[]): NestModules 
     return v
   }
 
-  const byFile = new Map<string, ModuleTimeout>()
+  const byFile = new Map<string, ModuleTimeout | 'bare'>()
   let opaqueConfigured = false
+  let globalConfigured: ModuleTimeout | null = null
   for (const [k, m] of mods) {
+    // A `@Global()` module's EXPORTS reach every module with no imports edge, so what it provides
+    // is the fallback for any file no module claims. sf-nest-admin's SharedModule is `@Global()`,
+    // registers timeout 5000 and re-exports HttpModule, and the modules that consume it never
+    // mention HttpModule at all, so without this four calls reported no-timeout at error
+    // severity against protected code.
+    if (m.isGlobal) globalConfigured = stronger(globalConfigured, provides(k, new Set()))
+
     const v = configured(k, new Set())
-    if (!v) continue
-    if (!m.membersComplete) opaqueConfigured = true
-    for (const f of m.memberFiles)
-      byFile.set(f, stronger(byFile.get(f) ?? null, v) as ModuleTimeout)
+    if (v) {
+      if (!m.membersComplete) opaqueConfigured = true
+      for (const f of m.memberFiles) {
+        const prev = byFile.get(f)
+        byFile.set(f, stronger(prev === 'bare' ? null : (prev ?? null), v) as ModuleTimeout)
+      }
+      continue
+    }
+    // No configured HttpModule reached this module, but it imports one itself. That is its own
+    // unconfigured instance, and it beats whatever a global module exports.
+    if (m.ownBare) for (const f of m.memberFiles) if (!byFile.has(f)) byFile.set(f, 'bare')
   }
-  return { byFile, opaqueConfigured }
+  return { byFile, globalConfigured, opaqueConfigured }
 }
 
 /**
  * The verdict for a file that injects `HttpService`, or undefined to leave it alone.
  *
- * A file no module claims falls back to `opaqueConfigured`: silent only when some configured
- * module's membership was unreadable, so it might be one of them.
+ * Precedence follows how Nest resolves the provider: the module that declares the file wins, then
+ * a `@Global()` module's exports, then `opaqueConfigured`, which is silent only when some
+ * configured module's membership was unreadable and this file might be one of its providers.
  */
 export function moduleTimeoutFor(nest: NestModules, filePath: string): ModuleTimeout | undefined {
-  return nest.byFile.get(stripExt(filePath)) ?? (nest.opaqueConfigured ? 'unknown' : undefined)
+  const own = nest.byFile.get(stripExt(filePath))
+  // An explicit HttpModule import resolves in that module's own context, so an unconfigured one
+  // stays unconfigured even when a global module exports a configured HttpService.
+  if (own === 'bare') return undefined
+  return own ?? nest.globalConfigured ?? (nest.opaqueConfigured ? 'unknown' : undefined)
 }

@@ -68,6 +68,22 @@ describe('a timeout registered on the module reaches the calls it configures', (
   })
 })
 
+describe('a @Global() module reaches modules that never import it', () => {
+  // sf-nest-admin's shape, and the case that made this necessary: a @Global() SharedModule
+  // registers `timeout: 5000` and re-exports HttpModule, and NetDiskOverviewService receives it
+  // through a module (NetDiskModule) whose imports never mention HttpModule at all. Without
+  // this, four no-timeout findings fired at error severity against protected code.
+  it('silences a provider of a module with no HttpModule edge of its own', async () => {
+    expect(await timeoutOf('reader.service.ts', 'nestjs-global-module')).toBe('instance-default')
+  })
+
+  it('still fires where a module imports HttpModule bare for itself', async () => {
+    // An explicit import resolves in that module's own context, so it is that module's own
+    // unconfigured instance and beats what the global module exports.
+    expect(await timeoutOf('own.service.ts', 'nestjs-global-module')).toBeNull()
+  })
+})
+
 describe('a configured module whose providers cannot be read', () => {
   it('cannot prove absence for a file it might provide', async () => {
     // `providers: [...USE_CASES]` spreads an imported constant, so membership is unreadable and a
