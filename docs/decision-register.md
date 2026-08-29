@@ -1,30 +1,73 @@
-# Decision Register: apiwatch Next Steps
+# Decision register: does apiwatch continue
 
-**Date Pre-registered:** 2026-08-29
-**Evaluation Date:** 2026-09-15
+Written 2026-08-29, before the first upstream PR was opened. The commit timestamp is the
+pre-registration. Nothing below may be edited after the fact except the Outcomes section, which is
+append-only.
 
-## The Stop Condition
+## Why this file exists
 
-By 2026-09-15, success is defined as achieving **at least 2** of the following 3 signals:
+This project pre-registered its scoring rules, its judge qualification traps, and its abort
+condition before running a 40-finding precision audit
+(`docs/audits/no-retry-precision/scoring.md`). The product decision had no threshold at all. That
+asymmetry is the thing this file fixes: a decision about where the next month of work goes deserves
+at least the rigor applied to a 40-case sample.
 
-1. **Upstream PR Merged:** At least one upstream PR (e.g., to novu or Jukebox-Server) that fixes a missing timeout found by apiwatch is merged by the maintainers.
-2. **External Issue:** At least one external issue is opened on the apiwatch repository by a user (must be a substantive issue or feature request, not a typo fix).
-3. **Organic Adoption:** At least one repository (other than those owned by the author) is found using apiwatch in their CI/CD or package.json, discoverable via GitHub code search.
+## The question being tested
 
-If fewer than 2 of these signals are met by the evaluation date, apiwatch will be archived as a completed experiment. No further product code (ESLint plugin, NestJS CLI reports) will be written.
+Not "is apiwatch correct". That is measured: `no-timeout` 40 of 40, `no-retry` 39 of 40, both
+against blind judges at pinned commits.
 
-## What Does NOT Count
+The untested question is upstream of that: **is a missing HTTP timeout a defect that a maintainer
+will accept a diff for?** If the answer is no, then no packaging, no ESLint plugin, and no amount of
+further precision work matters. If the answer is yes, the form factor question becomes worth asking
+with real signal behind it.
 
-To prevent rationalizing failure, the following metrics explicitly **do not count** towards the success threshold:
-* npm download counts (too easily skewed by bots/scanners).
-* GitHub stars (vanity metric, does not indicate usage).
-* Any traffic, runs, or logs originating from this account's own CI workflows.
+## Threshold
 
-## Results Log
+**By 2026-10-15, at least 2 of the following must be true:**
 
-* **Novu PR:** [Link pending] - Status: [Pending] - Maintainer response: [Pending]
-* **Jukebox-Server PR:** [Link pending] - Status: [Pending] - Maintainer response: [Pending]
-* **Publishing the negative result:** [Link pending] - Status: [Pending]
+1. One upstream pull request, opened by me and citing a finding apiwatch produced, is **merged**.
+2. One issue is opened on this repository by somebody other than me, and it is not a typo fix, a
+   dependency bump, or an automated report.
+3. One repository other than mine uses apiwatch, discoverable through GitHub code search for
+   `apiwatch` in a workflow file, a `package.json`, or an `.apiwatch-baseline.json`.
 
-## Final Decision
-*To be filled on 2026-09-15*
+**Fewer than 2 and apiwatch is archived** as a completed experiment: a README header stating so,
+`docs/audits/` kept prominent, and a section showing how to get most of the value from stock ESLint
+configuration. The code stays published and working at 0.5.0. Archiving means no further feature
+work, not deletion.
+
+## What explicitly does not count
+
+These are unreadable for this project and must not be used to argue either way:
+
+- **npm download counts.** 2,835 in the 30 days to 2026-08-27, concentrated in 6 days beginning the
+  day of first publish, peaking at 1,604 in one day. That is registry mirrors, security scanners,
+  this repository's own CI, and local installs made while testing. There is no way to separate a
+  real install from a crawler here.
+- **GitHub stars.** Trivially influenced by posting, and they measure attention rather than use.
+- **Any traffic originating from this account**, including CI runs and differential measurement.
+- **A polite reply on a PR.** Only a merge counts for criterion 1. "Thanks, we will look at it" is
+  not a result.
+
+## What a negative result looks like, stated in advance
+
+If maintainers close the PRs with reasoning along the lines of "we know, and we do not consider it
+worth changing", that is a **successful experiment with a negative answer**, not a failure. It is
+the single most valuable sentence this exercise can produce, because it invalidates the premise
+cheaply and in public. Record the reasoning verbatim below.
+
+The failure mode to guard against is not a negative result. It is moving the bar in October.
+
+## Outcomes
+
+Append only. Record every PR the moment it is opened, and its resolution whenever it lands,
+including maintainer reasoning quoted directly.
+
+| date | event | detail |
+|---|---|---|
+| 2026-08-29 | register committed | threshold set, before any PR opened |
+
+## Decision
+
+To be completed on 2026-10-15, against the threshold above and nothing else.
