@@ -67,6 +67,10 @@ including maintainer reasoning quoted directly.
 | date | event | detail |
 |---|---|---|
 | 2026-08-29 | register committed | threshold set, before any PR opened |
+| 2026-08-29 | PR opened | [novuhq/novu#12489](https://github.com/novuhq/novu/pull/12489) `fix(api)`: explicit timeout on the partner-integrations HttpModule. Resolves 6 unbounded Vercel API calls. Verified before and after with 0.5.0 |
+| 2026-08-29 | PR opened | [ufosc/Jukebox-Server#149](https://github.com/ufosc/Jukebox-Server/pull/149) `fix(spotify)`: explicit timeout on the Spotify HttpModule. Resolves 3 unbounded calls, `no-timeout` 3 to 0 |
+| 2026-08-29 | PR prepared, not opened | novu worker telemetry. Branch `vishalsg42:fix/telemetry-http-timeout` is pushed and one commit ahead of `next`. GitHub refused `CreatePullRequest` with a permissions error on three attempts across a 3 minute backoff, while `rate_limit` reported 5000 of 5000 remaining on both core and graphql. Reads as an abuse heuristic on a second PR from a newly created fork rather than a quota. Not retried further to avoid compounding it |
+| 2026-08-29 | tool defect observed | Verifying the novu patch, apiwatch reported 7 findings resolved by a change that resolved 6. The seventh was silenced by the repository-wide NestJS abstain, not fixed. Recorded in `docs/limitations.md` and corrected before it reached a PR body |
 
 ## Decision
 
